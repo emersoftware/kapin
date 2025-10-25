@@ -1,0 +1,28 @@
+{
+  "name": "sandbox-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that wraps @cloudflare/sandbox SDK for KAPIN",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "types": "wrangler types"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "sandbox",
+    "durable-objects"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@cloudflare/sandbox": "^0.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250110.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.45.0"
+  }
+}
