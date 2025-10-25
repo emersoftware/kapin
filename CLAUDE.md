@@ -34,24 +34,28 @@ Repository → Features → Potential Product Metrics → Executables
 
 ## Tech Stack
 
-### Frontend & Fullstack
+### Frontend & Fullstack (web-worker)
 
-- **Framework**: Next.js
+- **Framework**: Next.js 15 with @opennextjs/cloudflare adapter
 - **Styling**: Tailwind CSS + shadcn/ui (component library)
 - **ORM**: Drizzle (for schema management, migrations, and database version control)
 - **Authentication**: Auth.js with GitHub OAuth
-- **Real-time**: WebSockets (for agent progress updates)
+- **Real-time**: Durable Objects + Native WebSockets (for agent progress updates)
+- **Deployment**: Cloudflare Pages
 
-### Agent Execution
+### Agent Execution (agent-worker)
 
-- **Sandbox**: Cloudflare Sandbox (launched from Next.js app)
-- **Agent Framework**: LangGraph + LangChain (Python scripts running in sandbox)
-- **Architecture**:
-  - Sandboxes are created per project from Next.js
-  - Repos are cloned inside the sandbox
-  - Agents execute Python scripts within the sandbox
-  - Agents make HTTP requests to Next.js API
-  - Next.js emits WebSocket events to frontend for real-time updates
+- **Runtime**: Cloudflare Workers (TypeScript)
+- **Agent Framework**: LangGraph.js + LangChain (TypeScript, not Python!)
+- **LLM Provider**: Anthropic Claude (via @langchain/anthropic)
+- **Communication**: Service Bindings to sandbox-worker and web-worker
+
+### Sandbox Management (sandbox-worker)
+
+- **Runtime**: Cloudflare Workers with Durable Objects
+- **SDK**: @cloudflare/sandbox
+- **Container**: Full Linux environment with git, Node.js, Python
+- **Operations**: exec, file read/write, repo cloning, directory listing
 
 ### Database
 
@@ -60,6 +64,13 @@ Repository → Features → Potential Product Metrics → Executables
   - No Supabase Auth
   - No Row Level Security (RLS)
 - **Management**: All schema and migrations handled via Drizzle ORM
+
+### Deployment Architecture
+
+All three workers deployed to Cloudflare:
+- **web-worker**: Next.js on Cloudflare Pages
+- **agent-worker**: Cloudflare Worker (orchestrates agent logic)
+- **sandbox-worker**: Cloudflare Worker with Durable Objects (sandbox operations)
 
 ## Database Schema
 
@@ -234,63 +245,90 @@ The MVP consists of a single page with a complete onboarding experience:
 
 ## Architecture
 
-### High-Level Architecture
+### High-Level Architecture - Three Cloudflare Workers
 
 ```
-┌─────────────────────────────────────┐
-│         Next.js App                 │
-│   ┌─────────────────────────────┐   │
-│   │  Frontend (React)           │   │
-│   │  - Onboarding UI            │   │
-│   │  - WebSocket client         │   │
-│   └──────────┬──────────────────┘   │
-│              │                       │
-│   ┌──────────▼──────────────────┐   │
-│   │  API Routes (BFF)           │   │
-│   │  - Auth endpoints           │   │
-│   │  - Sandbox management       │   │
-│   │  - WebSocket server         │   │
-│   │  - Agent callbacks          │   │
-│   └──────────┬──────────────────┘   │
-│              │                       │
-│   ┌──────────▼──────────────────┐   │
-│   │  Drizzle ORM                │   │
-│   └──────────┬──────────────────┘   │
-└──────────────┼───────────────────────┘
-               │
-               ▼
-    ┌──────────────────────┐
-    │  PostgreSQL          │
-    │  (Supabase)          │
-    └──────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  web-worker (Next.js @opennextjs/cloudflare)           │
+│  - Frontend UI + API Routes                             │
+│  - Auth.js                                              │
+│  - Drizzle ORM                                          │
+│  - Durable Object: WebSocketSession                     │
+│  - Exposes: /api/agent/* for callbacks                  │
+└────────────▲────────────────────────────────────────────┘
+             │ Service Binding (callbacks)
+             │
+┌────────────┴─────────────────────────────────────────────┐
+│  agent-worker (LangGraph.js + LangChain)                │
+│  - LangGraph agent orchestration                         │
+│  - Feature detection                                     │
+│  - Metric generation                                     │
+│  - Instrumentation guide generation                      │
+│  - Uses: Service Binding → sandbox-worker                │
+│  - Uses: Service Binding → web-worker (callbacks)        │
+└────────────┬─────────────────────────────────────────────┘
+             │ Service Binding
+             ↓
+┌──────────────────────────────────────────────────────────┐
+│  sandbox-worker (@cloudflare/sandbox)                    │
+│  - Durable Object: Sandbox                               │
+│  - Clone repos                                           │
+│  - Execute commands                                      │
+│  - File operations                                       │
+└──────────────────────────────────────────────────────────┘
+             │
+             ↓
+    ┌────────────────────┐
+    │  PostgreSQL        │
+    │  (Supabase)        │
+    │  ← web-worker      │
+    └────────────────────┘
 
-         ┌──────────────────────────┐
-         │  Cloudflare Sandbox      │
-         │  ┌────────────────────┐  │
-         │  │  Cloned Repos      │  │
-         │  └────────────────────┘  │
-         │  ┌────────────────────┐  │
-         │  │  Python Environment│  │
-         │  │  - LangGraph       │  │
-         │  │  - LangChain       │  │
-         │  │  - KAPIN Agent     │  │
-         │  └────────┬───────────┘  │
-         └───────────┼──────────────┘
-                     │
-                     │ HTTP Requests
-                     ▼
-         ┌───────────────────────┐
-         │  Next.js API Routes   │
-         │  (Agent callbacks)    │
-         └───────────┬───────────┘
-                     │
-                     │ WebSocket emit
-                     ▼
-         ┌───────────────────────┐
-         │  Frontend             │
-         │  (Real-time updates)  │
-         └───────────────────────┘
+Usuario → web-worker → agent-worker → sandbox-worker
+                ↑           ↓
+                └───────────┘
+              (callbacks via Service Binding)
 ```
+
+### Three Workers Explained
+
+#### 1. **web-worker** (Next.js Frontend + BFF)
+- Your existing Next.js application
+- Handles UI, authentication, database operations
+- Exposes callback endpoints for agent-worker
+- Manages WebSocket connections via Durable Objects
+- **Endpoints:**
+  - `/api/agent/progress` - Receive progress updates, emit to WebSocket
+  - `/api/agent/metrics` - Save metrics to database
+  - `/api/agent/complete` - Mark run as completed
+  - `/api/agent/error` - Handle agent errors
+  - `/api/runs/[id]/start` - Triggers agent-worker via Service Binding
+
+#### 2. **agent-worker** (Agent Orchestration)
+- Runs the LangGraph.js agent workflow
+- Communicates with sandbox-worker to execute commands
+- Makes callbacks to web-worker to save progress/metrics
+- **Flow:**
+  1. Setup sandbox (create + clone repos)
+  2. Analyze structure (ls, find files, read package.json)
+  3. Detect features (LLM analysis)
+  4. Generate metrics (LLM generation)
+  5. Save to DB (callback to web-worker)
+- **Endpoints:**
+  - `POST /api/runs/:runId/start` - Start agent analysis
+
+#### 3. **sandbox-worker** (Sandbox Operations)
+- Wraps @cloudflare/sandbox SDK
+- Provides REST API for sandbox operations
+- One persistent sandbox per project
+- **Endpoints:**
+  - `POST /sandboxes/:projectId` - Get/create sandbox
+  - `POST /sandboxes/:projectId/exec` - Execute command
+  - `POST /sandboxes/:projectId/clone` - Clone repo
+  - `GET /sandboxes/:projectId/files/*` - Read file
+  - `PUT /sandboxes/:projectId/files/*` - Write file
+  - `GET /sandboxes/:projectId/ls` - List directory
+  - `DELETE /sandboxes/:projectId` - Cleanup sandbox
 
 ### Authentication Flow
 
@@ -301,17 +339,23 @@ The MVP consists of a single page with a complete onboarding experience:
 5. Session managed by Auth.js
 6. Protected routes check session server-side
 
-### Agent Communication Flow
+### Agent Communication Flow (Three Workers)
 
-1. Frontend triggers sandbox creation via API
-2. Next.js API creates Cloudflare sandbox
-3. Sandbox clones repos and starts Python agent
-4. Agent makes HTTP POST requests to Next.js callbacks:
-   - `/api/agent/progress` - Update progress
-   - `/api/agent/metrics` - Submit discovered metrics
-   - `/api/agent/complete` - Mark run as complete
-5. Next.js API routes emit WebSocket events to frontend
-6. Frontend updates UI in real-time
+1. **User triggers run** → Frontend calls `POST /api/runs/[id]/start` on web-worker
+2. **web-worker** invokes agent-worker via Service Binding
+3. **agent-worker** invokes sandbox-worker via Service Binding to:
+   - Create/get sandbox for project
+   - Clone repositories (if not already cloned) or pull latest
+4. **agent-worker** executes LangGraph workflow:
+   - Setup sandbox → callback to web-worker: `POST /api/agent/progress` ("Setting up sandbox...")
+   - Clone repos → callback: `POST /api/agent/progress` ("Cloning repositories...")
+   - Analyze structure → callback: `POST /api/agent/progress` ("Analyzing code structure...")
+   - Detect features → callback: `POST /api/agent/progress` ("Detected feature: Payments")
+   - Generate metrics → callback: `POST /api/agent/metrics` (save to DB)
+   - Complete → callback: `POST /api/agent/complete` (mark run complete)
+5. **web-worker** receives callbacks and emits WebSocket events to frontend via Durable Object
+6. **Frontend** updates UI in real-time with agent progress
+7. When complete, frontend transitions to Step 3 (metrics display)
 
 ### Run Lifecycle
 
@@ -351,31 +395,60 @@ The MVP consists of a single page with a complete onboarding experience:
 - GitHub OAuth is the only login method
 - Store GitHub tokens securely in `integration` table
 
-### Sandbox Management
+### Worker Development
 
-- Create one sandbox per project/run
-- Clone all project repos into sandbox before starting agent
-- Pass necessary environment variables to sandbox
-- Clean up sandboxes after run completion (or set TTL)
+#### sandbox-worker
+- Use @cloudflare/sandbox SDK's `getSandbox(env.Sandbox, projectId)`
+- One sandbox per project (persistent across runs)
+- All sandbox operations are async
+- Return structured responses: `{ success, stdout, stderr, exitCode }`
+- Use Durable Objects for sandbox state management
+
+#### agent-worker
+- Use LangGraph.js for agent workflow orchestration
+- All agents written in TypeScript
+- Use Service Bindings to communicate with sandbox-worker and web-worker
+- Keep nodes modular and composable
+- Use Anthropic Claude via @langchain/anthropic
+- Store ANTHROPIC_API_KEY as Cloudflare secret
+
+#### web-worker
+- Next.js with @opennextjs/cloudflare adapter
+- Use Service Bindings to receive calls from agent-worker
+- WebSocket management via Durable Objects (not socket.io)
+- All agent callbacks must emit WebSocket events for real-time updates
 
 ### WebSocket Events
 
-- Emit events for all agent progress updates
-- Event types:
-  - `agent:started`
-  - `agent:progress` (with message)
-  - `agent:feature_detected`
-  - `agent:metric_generated`
-  - `agent:completed`
-  - `agent:error`
+Emitted from web-worker callbacks to frontend:
+- `agent:started` - Agent workflow has started
+- `agent:progress` - Progress update with message (e.g., "Cloning repos...")
+- `agent:feature_detected` - Feature detected with feature name
+- `agent:metric_generated` - Metric generated with metric ID
+- `agent:completed` - Agent completed successfully
+- `agent:error` - Error occurred with error message
 
-### Agent Development
+### Service Bindings Configuration
 
-- Use LangGraph for complex agent workflows
-- Keep agents modular and composable
-- All code execution happens in Cloudflare Sandbox
-- Agents communicate with Next.js via HTTP callbacks
-- Never execute untrusted code outside sandbox
+Each worker must declare bindings in `wrangler.toml`:
+
+**agent-worker** needs:
+```toml
+[[services]]
+binding = "SANDBOX_WORKER"
+service = "kapin-sandbox-worker"
+
+[[services]]
+binding = "WEB_WORKER"
+service = "kapin-web-worker"
+```
+
+**web-worker** needs:
+```toml
+[[services]]
+binding = "AGENT_WORKER"
+service = "kapin-agent-worker"
+```
 
 ## Research & References
 
@@ -411,19 +484,317 @@ See `/research/open-swe/` for reference implementations and research on:
 7. Navigate to app and complete onboarding
 8. Point KAPIN at your first repository to analyze
 
-## Environment Variables
+## Environment Variables & Secrets
 
-### Next.js App
-```
+### web-worker (Next.js)
+```bash
+# .dev.vars (local) or Cloudflare dashboard (production)
 DATABASE_URL=postgresql://...
 NEXTAUTH_SECRET=...
 NEXTAUTH_URL=http://localhost:3000
 GITHUB_ID=...
 GITHUB_SECRET=...
-CLOUDFLARE_SANDBOX_API_KEY=...
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
+SUPABASE_URL=...
+SUPABASE_KEY=...
 ```
+
+### agent-worker
+```bash
+# Set via: wrangler secret put ANTHROPIC_API_KEY
+ANTHROPIC_API_KEY=sk-ant-xxx...
+```
+
+### sandbox-worker
+```bash
+# No secrets needed
+# Uses Cloudflare Sandbox binding configured in wrangler.toml
+```
+
+## Implementation Guide - Three Workers
+
+### Project Structure
+
+```
+the-agent-hackathon/
+├── web-worker/             # web-worker (Next.js - already exists)
+│   ├── src/
+│   ├── wrangler.toml
+│   └── package.json
+├── agent-worker/           # TO BE CREATED
+│   ├── src/
+│   │   ├── index.ts
+│   │   ├── agent/
+│   │   │   ├── graph.ts
+│   │   │   ├── state.ts
+│   │   │   ├── nodes/
+│   │   │   │   ├── setup-sandbox.ts
+│   │   │   │   ├── analyze-structure.ts
+│   │   │   │   ├── detect-features.ts
+│   │   │   │   ├── generate-metrics.ts
+│   │   │   │   └── save-results.ts
+│   │   │   └── tools/
+│   │   │       ├── sandbox-exec.ts
+│   │   │       ├── sandbox-read-file.ts
+│   │   │       └── sandbox-list-files.ts
+│   │   └── services/
+│   │       ├── sandbox-client.ts
+│   │       └── web-client.ts
+│   ├── wrangler.toml
+│   └── package.json
+└── sandbox-worker/         # TO BE CREATED
+    ├── src/
+    │   └── index.ts
+    ├── wrangler.toml
+    └── package.json
+```
+
+### Development Order
+
+**Phase 1: sandbox-worker** (Start here)
+- Simplest worker, no dependencies
+- Wraps @cloudflare/sandbox SDK
+- Provides REST API for sandbox operations
+
+**Phase 2: agent-worker** (After sandbox-worker)
+- Depends on sandbox-worker
+- Orchestrates LangGraph workflow
+- Makes callbacks to web-worker
+
+**Phase 3: web-worker** (Finally)
+- Add callback endpoints for agent
+- Configure Service Binding to agent-worker
+- Implement Durable Object for WebSocket
+
+### 1. sandbox-worker Setup
+
+#### Dependencies (sandbox-worker/package.json)
+```json
+{
+  "name": "sandbox-worker",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "^0.3.3",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.101.0"
+  }
+}
+```
+
+#### Configuration (sandbox-worker/wrangler.toml)
+```toml
+name = "kapin-sandbox-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-20"
+
+[[durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+script_name = "kapin-sandbox-worker"
+
+[containers]
+image = "docker.io/cloudflare/sandbox:latest"
+
+[vars]
+ENVIRONMENT = "production"
+```
+
+#### Endpoints
+- `POST /sandboxes/:projectId` - Create/get sandbox
+- `POST /sandboxes/:projectId/exec` - Execute command
+- `POST /sandboxes/:projectId/clone` - Clone repo (via GitHub tarball)
+- `GET /sandboxes/:projectId/files/*` - Read file
+- `PUT /sandboxes/:projectId/files/*` - Write file
+- `GET /sandboxes/:projectId/ls` - List directory
+- `DELETE /sandboxes/:projectId` - Cleanup sandbox
+
+### 2. agent-worker Setup
+
+#### Dependencies (agent-worker/package.json)
+```json
+{
+  "name": "agent-worker",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "^0.2.38",
+    "@langchain/core": "^0.3.15",
+    "@langchain/anthropic": "^0.3.7",
+    "hono": "^4.6.14",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.101.0"
+  }
+}
+```
+
+#### Configuration (agent-worker/wrangler.toml)
+```toml
+name = "kapin-agent-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-20"
+compatibility_flags = ["nodejs_compat"]
+
+[[services]]
+binding = "SANDBOX_WORKER"
+service = "kapin-sandbox-worker"
+environment = "production"
+
+[[services]]
+binding = "WEB_WORKER"
+service = "kapin-web-worker"
+environment = "production"
+
+[vars]
+ENVIRONMENT = "production"
+```
+
+#### Agent Workflow
+```
+START
+  ↓
+setup_sandbox (create sandbox + clone repos)
+  ↓
+analyze_structure (ls, find files, read package.json)
+  ↓
+detect_features (use LLM to detect: auth, payments, etc.)
+  ↓
+generate_metrics (use LLM to generate product metrics)
+  ↓
+save_to_db (callback to web-worker)
+  ↓
+END
+```
+
+#### Endpoints
+- `POST /api/runs/:runId/start` - Start agent analysis
+
+### 3. web-worker Updates
+
+#### New API Routes to Create
+- `POST /api/agent/progress` - Receive progress, emit WebSocket
+- `POST /api/agent/metrics` - Save metrics to DB
+- `POST /api/agent/complete` - Mark run complete
+- `POST /api/agent/error` - Handle errors
+
+#### Update Existing Routes
+```typescript
+// app/api/runs/[id]/start/route.ts
+export async function POST(req, { params }, context) {
+  const response = await context.env.AGENT_WORKER.fetch(
+    new Request(`https://fake/api/runs/${params.id}/start`, {
+      method: 'POST',
+      body: await req.text(),
+    })
+  );
+  return response;
+}
+```
+
+#### Add Durable Object for WebSockets
+Create `src/lib/websocket/WebSocketSession.ts` for managing real-time connections.
+
+### Development Commands
+
+#### sandbox-worker
+```bash
+cd sandbox-worker
+npm init -y
+npm install @cloudflare/sandbox hono
+npm install -D @cloudflare/workers-types typescript wrangler
+
+# Development
+npm run dev
+
+# Testing
+curl -X POST http://localhost:8787/sandboxes/test-project
+curl -X POST http://localhost:8787/sandboxes/test-project/exec \
+  -H "Content-Type: application/json" \
+  -d '{"command":"ls -la"}'
+
+# Deploy
+npm run deploy
+```
+
+#### agent-worker
+```bash
+cd agent-worker
+npm init -y
+npm install @langchain/langgraph @langchain/core @langchain/anthropic hono zod
+npm install -D @cloudflare/workers-types typescript wrangler
+
+# Set secret
+wrangler secret put ANTHROPIC_API_KEY
+
+# Development (requires sandbox-worker running)
+npm run dev
+
+# Testing
+curl -X POST http://localhost:8788/api/runs/test-run-1/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "runId": "test-run-1",
+    "projectId": "proj-1",
+    "repos": [{
+      "name": "test-repo",
+      "clone_url": "https://github.com/user/repo.git"
+    }]
+  }'
+
+# Deploy
+npm run deploy
+```
+
+#### web-worker
+```bash
+cd web-worker
+
+# Add Service Binding to wrangler.toml
+# Create callback endpoints in app/api/agent/
+# Implement Durable Object for WebSocket
+
+# Development
+npm run dev
+
+# Deploy
+npm run deploy
+```
+
+### Testing End-to-End Flow
+
+1. Start all three workers locally:
+   - `sandbox-worker` on port 8787
+   - `agent-worker` on port 8788
+   - `web-worker` on port 3000
+
+2. Sign in to KAPIN frontend
+
+3. Select repos and create project (Step 1)
+
+4. Frontend calls `POST /api/runs/[id]/start`
+
+5. Watch WebSocket events in browser console:
+   - "Setting up sandbox..."
+   - "Cloning repositories..."
+   - "Analyzing code structure..."
+   - "Detected feature: Authentication"
+   - "Generated metric: Login Success Rate"
+   - "Analysis complete!"
+
+6. Verify metrics in database and UI (Step 3)
 
 ## MVP Scope
 
@@ -445,6 +816,55 @@ ANTHROPIC_API_KEY=...
 - ❌ Multi-language support (focus on JS/TS first)
 - ❌ Custom metric definitions
 
+## Key Architecture Decisions
+
+### Why Three Workers?
+
+1. **Separation of Concerns**
+   - web-worker: UI, Auth, Database (stateful)
+   - agent-worker: Agent logic, LLM orchestration (stateless)
+   - sandbox-worker: Code execution, file operations (isolated)
+
+2. **Security**
+   - Untrusted code executes only in sandbox-worker
+   - Database credentials never exposed to sandbox
+   - GitHub tokens managed in web-worker only
+
+3. **Scalability**
+   - Each worker can scale independently
+   - Service Bindings are fast (direct worker-to-worker communication)
+   - Persistent sandboxes reduce cold start time
+
+### Why TypeScript (not Python)?
+
+- **Cloudflare Workers** run JavaScript/TypeScript natively
+- **LangGraph.js** provides same agent capabilities as Python version
+- **No runtime conversion** needed (Python Workers use Pyodide/WASM, adding overhead)
+- **Simpler deployment** - all workers use same toolchain (wrangler)
+- **Better integration** with Next.js ecosystem
+
+### Why Durable Objects (not socket.io)?
+
+- **socket.io doesn't work** on Cloudflare Pages (requires custom server)
+- **Durable Objects** provide native WebSocket support
+- **Hibernation API** reduces memory usage during idle connections
+- **Cloudflare-native** solution, no external dependencies
+
+### Why GitHub Tarball (not git clone)?
+
+- **Lighter weight** than full git clone
+- **No git binary** needed in sandbox
+- **Faster** for initial download
+- **Sufficient** for code analysis (no git history needed)
+
+### Repository Access Strategy
+
+Repos are cloned/downloaded on first run, then pulled on subsequent runs:
+1. Check if repo exists in sandbox: `ls /workspace/{repo-name}`
+2. If not exists: Download tarball, extract to `/workspace/{repo-name}`
+3. If exists: Pull latest (or re-download tarball)
+4. This makes subsequent runs faster while keeping code up-to-date
+
 ## Notes
 
 - This project is being built for a hackathon
@@ -452,3 +872,5 @@ ANTHROPIC_API_KEY=...
 - Prioritize UX: make the agent's work visible and exciting
 - WebSocket updates are crucial for showing progress and building trust
 - Markdown instrumentation guides should be clear, copy-pasteable, and actionable
+- **All workers must be deployed to Cloudflare** for Service Bindings to work
+- Start with sandbox-worker (simplest), then agent-worker, then web-worker updates
