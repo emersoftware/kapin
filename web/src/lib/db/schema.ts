@@ -8,6 +8,7 @@ import {
   jsonb,
   integer,
   primaryKey,
+  unique,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -78,7 +79,9 @@ export const integrations = pgTable("integrations", {
   accessToken: text("access_token").notNull(),
   refreshToken: text("refresh_token"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  userProviderUnique: unique().on(table.userId, table.provider),
+}));
 
 export const repos = pgTable("repos", {
   id: uuid("id").primaryKey().defaultRandom(),
