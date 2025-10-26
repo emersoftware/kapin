@@ -6,22 +6,19 @@ main = "src/index.ts"
 compatibility_date = "2025-03-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Container configuration
-# Defines the Docker image and resource allocation for sandbox instances
+# Containers configuration (required for @cloudflare/sandbox)
 [[containers]]
 class_name = "Sandbox"
 image = "./Dockerfile"
-instance_type = "lite"  # Options: lite, standard, premium
-max_instances = 5       # Allow up to 5 concurrent sandbox instances
+instance_type = "lite"
+max_instances = 1
 
 # Durable Objects binding
-# Makes the Sandbox Durable Object accessible in the worker
 [[durable_objects.bindings]]
 class_name = "Sandbox"
 name = "Sandbox"
 
 # Migrations
-# Registers the Sandbox class with SQLite storage backend (required once)
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Sandbox"]
@@ -29,6 +26,3 @@ new_sqlite_classes = ["Sandbox"]
 # Observability
 [observability]
 enabled = true
-
-# Note: No secrets needed for sandbox-worker
-# The Cloudflare Sandbox binding is configured automatically

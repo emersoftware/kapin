@@ -1,0 +1,19 @@
+name = "kapin-agents-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-20"
+compatibility_flags = ["nodejs_compat"]
+
+# Service Bindings to other workers
+[[services]]
+binding = "SANDBOX_WORKER"
+service = "kapin-sandbox-worker"
+
+[[services]]
+binding = "WEB_WORKER"
+service = "kapin-web-worker"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets (set via: wrangler secret put ANTHROPIC_API_KEY)
+# ANTHROPIC_API_KEY

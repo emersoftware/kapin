@@ -7,7 +7,7 @@
 		"build": "next build",
 		"start": "next start",
 		"lint": "next lint",
-		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview --port 3000",
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
 		"cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
 		"db:generate": "dotenv -e .env.local -- drizzle-kit generate",
