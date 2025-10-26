@@ -7,7 +7,7 @@
 
 import * as z from "zod";
 import { createAgent, tool } from "langchain";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatGroq } from "@langchain/groq";
 import type { Env, Topic } from "../types";
 import { MetricsOutputSchema } from "../types";
 import { E2BSandboxClient } from "../services/e2b-sandbox-client";
@@ -91,11 +91,11 @@ export function createMetricGeneratorAgent(env: Env, sandboxClient: E2BSandboxCl
     }
   );
 
-  // Create agent with Anthropic model
+  // Create agent with Groq model
   const agent = createAgent({
-    model: new ChatAnthropic({
-      modelName: "claude-haiku-4-5",
-      apiKey: env.ANTHROPIC_API_KEY,
+    model: new ChatGroq({
+      model: "openai/gpt-oss-120b",
+      apiKey: env.GROQ_API_KEY,
       temperature: 0,
     }),
     tools: [execCommand, readFile],
@@ -108,40 +108,103 @@ You will receive a topic/feature with:
 - description: What it does
 - relatedFiles: Key files for this feature
 
-Your goal is to generate 1-3 high-value product metrics for this specific topic.
+Your goal is to generate 1–3 high-value product metrics for this specific topic.
 
-Available tools:
-1. exec_command: Run shell commands to explore related files
-2. read_file: Read file contents to understand implementation
+---
 
-Workflow:
-1. Review the topic name, description, and related files
-2. Read 1-2 of the most relevant files to understand the feature
-3. Generate 1-3 actionable product metrics for this feature
-4. Each metric should be measurable and provide business value
+### Available tools
+1. exec_command — Run shell commands to explore related files  
+2. read_file — Read file contents to understand implementation  
 
-Each metric MUST include:
-- name: Clear metric name (e.g., "Login Success Rate", "Payment Completion Time")
-- description: What it measures and why it matters (be specific and actionable)
-- featureName: The topic name this belongs to
-- metricType: Type of metric (conversion, engagement, frequency, performance, retention, revenue, adoption, satisfaction)
-- sqlQuery: A suggested SQL query to calculate this metric using placeholder table names (events, users, etc.)
-- relatedFiles: List of files where this metric could be tracked (from the topic's relatedFiles)
+---
 
-SQL Query Examples:
-- Conversion: "SELECT COUNT(DISTINCT user_id) / (SELECT COUNT(*) FROM users) * 100 AS conversion_rate FROM events WHERE event_name = 'signup_completed'"
-- Engagement: "SELECT DATE(created_at) as date, COUNT(*) as daily_active_users FROM events WHERE event_name = 'dashboard_viewed' GROUP BY DATE(created_at)"
-- Frequency: "SELECT user_id, COUNT(*) as payment_count FROM events WHERE event_name = 'payment_completed' GROUP BY user_id"
-- Performance: "SELECT AVG(duration_ms) as avg_response_time FROM events WHERE event_name = 'api_request_completed' AND endpoint = '/api/auth/login'"
+### Optimized Workflow
+1. Review the topic name, description, and related files.  
+2. Read only 1–2 of the most relevant files to understand how the feature works.  
+3. Generate 1–3 **actionable product metrics** that measure the features real-world performance or user impact.  
+4. Each metric must be measurable, directly related to the feature, and provide business value.
 
-Guidelines:
-- Focus on metrics that provide clear business insights
-- Ensure SQL queries are realistic and use common event/user tables
-- Metrics should be specific to the feature (use the topic name in event names)
-- Prioritize metrics that are easy to instrument and understand
-- Generate 1-3 metrics (quality over quantity)
+---
 
-Be concise and actionable. Focus on metrics that help teams understand user behavior and feature performance.`,
+### Each metric must include
+- **name**: Clear metric name (e.g., "Login Success Rate", "Payment Completion Time")  
+- **description**: What it measures and why it matters (specific and actionable)  
+- **featureName**: The topic name this belongs to  
+- **metricType**: Type of metric (conversion, engagement, frequency, performance, retention, revenue, adoption, satisfaction)  
+- **sqlQuery**: Suggested SQL query using placeholder tables (e.g., events, users)  
+- **relatedFiles**: Key files where this metric could be tracked (from the topic’s relatedFiles)
+
+---
+
+### Example SQL queries
+**Conversion:**  
+
+SELECT 
+  COUNT(DISTINCT user_id) / (SELECT COUNT(*) FROM users) * 100 AS conversion_rate
+FROM events
+WHERE event_name = 'signup_completed';
+
+
+**Engagement:**  
+
+SELECT 
+  DATE(created_at) AS date, 
+  COUNT(*) AS daily_active_users
+FROM events
+WHERE event_name = 'dashboard_viewed'
+GROUP BY DATE(created_at);
+
+
+**Frequency:**  
+
+SELECT 
+  user_id, 
+  COUNT(*) AS payment_count
+FROM events
+WHERE event_name = 'payment_completed'
+GROUP BY user_id;
+
+
+**Performance:**  
+
+SELECT 
+  AVG(duration_ms) AS avg_response_time
+FROM events
+WHERE event_name = 'api_request_completed' 
+  AND endpoint = '/api/auth/login';
+
+
+---
+
+### Guidelines
+- Focus on **metrics that provide clear business or user insights.**  
+- Use **realistic SQL queries** with event and user tables.  
+- Metrics must be **specific to the feature** (use the topic name in event names).  
+- Prioritize **clarity, actionability, and ease of instrumentation.**  
+- Always generate **1–3 metrics maximum** (quality over quantity).  
+
+---
+
+### Output format
+
+{
+  "metrics": [
+    {
+      "name": "Login Success Rate",
+      "description": "Measures how often users successfully log in compared to total login attempts, indicating authentication reliability.",
+      "featureName": "User Authentication",
+      "metricType": "conversion",
+      "sqlQuery": "SELECT COUNT(*) FILTER (WHERE success = TRUE) * 100.0 / COUNT(*) AS login_success_rate FROM events WHERE event_name = 'user_login';",
+      "relatedFiles": ["repo-name/src/app/api/auth/route.ts", "repo-name/src/components/LoginForm.tsx"]
+    }
+  ]
+}
+
+
+---
+
+### Guiding principle
+Be concise and actionable. Focus on metrics that help teams understand **user behavior**, **feature adoption**, and **business performance**.`,
   });
 
   return agent;

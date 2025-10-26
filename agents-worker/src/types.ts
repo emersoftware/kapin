@@ -6,7 +6,7 @@ import { registry } from "@langchain/langgraph/zod";
 export type Env = {
   E2B_API_KEY: string;
   AGENT_SESSION: DurableObjectNamespace;
-  ANTHROPIC_API_KEY: string;
+  GROQ_API_KEY: string;
   WEB_WORKER_URL: string; // URL to web-worker for HTTP callbacks
   // LangSmith tracing (optional)
   LANGSMITH_TRACING?: string;
@@ -108,10 +108,23 @@ export const GraphStateSchema = z.object({
   repos: z.array(z.custom<Repository>()),
   githubToken: z.string().optional(),
 
-  // Step 1: Topic Detection
+  // Step 1: Topic Detection (parallel with top metrics)
   topics: z.array(z.custom<Topic>()).default(() => []),
 
-  // Step 2: Metric Generation (parallelized per topic)
+  // Step 2a: Top Metrics Generation (parallel with topic detection)
+  // Generates 3 priority metrics from entire codebase
+  topMetrics: z.array(z.custom<Metric>())
+    .default(() => [])
+    .register(registry, {
+      reducer: {
+        fn: (prev, next) => {
+          // next can be a single Metric or an array of Metrics
+          return Array.isArray(next) ? [...prev, ...next] : [...prev, next];
+        },
+      },
+    }),
+
+  // Step 2b: Metric Generation by Topic (parallelized per topic)
   // Reducer accumulates metrics from parallel workers
   allMetrics: z.array(z.custom<Metric>())
     .default(() => [])
@@ -124,20 +137,7 @@ export const GraphStateSchema = z.object({
       },
     }),
 
-  // Step 3: Metric Review (parallelized per metric)
-  // Reducer accumulates reviews from parallel workers
-  reviews: z.array(z.custom<Review>())
-    .default(() => [])
-    .register(registry, {
-      reducer: {
-        fn: (prev, next) => {
-          // next can be a single Review or an array of Reviews
-          return Array.isArray(next) ? [...prev, ...next] : [...prev, next];
-        },
-      },
-    }),
-
-  // Step 4: Filtered results
+  // Step 3: Combined results
   approvedMetrics: z.array(z.custom<Metric>()).default(() => []),
 
   // Error tracking

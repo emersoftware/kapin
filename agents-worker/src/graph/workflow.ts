@@ -2,10 +2,9 @@
  * Multi-Agent Workflow
  *
  * Orchestrates the complete metric detection pipeline:
- * 1. Topic Detection (sequential)
- * 2. Metric Generation (parallel per topic)
- * 3. Metric Review (parallel per metric)
- * 4. Filter Approved Metrics (sequential)
+ * 1. Topic Detection + Top Metrics Generation (parallel from START)
+ * 2. Metric Generation by Topic (parallel per topic, after step 1)
+ * 3. Filter & Combine Results (sequential)
  */
 
 import { StateGraph, START, END, Send } from "@langchain/langgraph";
@@ -15,8 +14,8 @@ import { E2BSandboxClient } from "../services/e2b-sandbox-client";
 
 // Import nodes
 import { topicDetectionNode } from "./nodes/topic-detection";
+import { generateTopMetricsNode } from "./nodes/generate-top-metrics";
 import { generateMetricsForTopic } from "./nodes/generate-metrics";
-import { reviewSingleMetric } from "./nodes/review-metrics";
 import { filterApprovedNode } from "./nodes/filter-approved";
 
 /**
@@ -49,20 +48,29 @@ export function createWorkflow(env: Env, sandboxClient: E2BSandboxClient) {
     return await topicDetectionNode(state, { env, sandboxClient });
   });
 
+  graph.addNode("generate_top_metrics", async (state: GraphState) => {
+    return await generateTopMetricsNode(state, { env, sandboxClient });
+  });
+
   graph.addNode("generate_metrics_for_topic", async (state: any) => {
     return await generateMetricsForTopic(state, { env, sandboxClient });
   });
 
-  graph.addNode("review_single_metric", async (state: any) => {
-    return await reviewSingleMetric(state, { env });
-  });
-
   graph.addNode("filter_approved", filterApprovedNode);
 
-  // Add edges
-  graph.addEdge(START, "topic_detection");
+  // Step 1: FROM START -> Launch topic_detection and generate_top_metrics in PARALLEL
+  graph.addConditionalEdges(
+    START,
+    (state: GraphState) => {
+      console.log(`[WORKFLOW] Launching parallel tasks: topic_detection + generate_top_metrics`);
+      return [
+        new Send("topic_detection", state),
+        new Send("generate_top_metrics", state),
+      ];
+    }
+  );
 
-  // Conditional edge: topic_detection -> generate_metrics_for_topic (parallel via Send)
+  // Step 2: FROM topic_detection -> Launch generate_metrics_for_topic (parallel per topic)
   graph.addConditionalEdges(
     "topic_detection",
     (state: GraphState) => {
@@ -77,26 +85,13 @@ export function createWorkflow(env: Env, sandboxClient: E2BSandboxClient) {
     }
   );
 
-  // Conditional edge: generate_metrics_for_topic -> review_single_metric (parallel via Send)
-  graph.addConditionalEdges(
-    "generate_metrics_for_topic",
-    (state: GraphState) => {
-      console.log(`[WORKFLOW] Creating ${state.allMetrics.length} parallel review tasks`);
-      // Use Send API to create parallel tasks for each metric
-      return state.allMetrics.map((metric, index) =>
-        new Send("review_single_metric", {
-          ...state,
-          currentMetric: metric,
-          currentMetricIndex: index,
-        })
-      );
-    }
-  );
+  // Step 3: FROM generate_top_metrics -> Go directly to filter_approved
+  graph.addEdge("generate_top_metrics", "filter_approved");
 
-  // Regular edge: review_single_metric -> filter_approved
-  graph.addEdge("review_single_metric", "filter_approved");
+  // Step 4: FROM generate_metrics_for_topic -> Go to filter_approved
+  graph.addEdge("generate_metrics_for_topic", "filter_approved");
 
-  // Regular edge: filter_approved -> END
+  // Step 5: FROM filter_approved -> END
   graph.addEdge("filter_approved", END);
 
   // Compile graph
@@ -123,8 +118,9 @@ export async function runWorkflow(
 
   console.log("[WORKFLOW] Workflow execution completed");
   console.log(`[WORKFLOW] Detected ${result.topics?.length || 0} topics`);
-  console.log(`[WORKFLOW] Generated ${result.allMetrics?.length || 0} total metrics`);
-  console.log(`[WORKFLOW] Approved ${result.approvedMetrics?.length || 0} metrics`);
+  console.log(`[WORKFLOW] Generated ${result.topMetrics?.length || 0} top priority metrics`);
+  console.log(`[WORKFLOW] Generated ${result.allMetrics?.length || 0} metrics by topic`);
+  console.log(`[WORKFLOW] Total approved ${result.approvedMetrics?.length || 0} metrics`);
 
   return result;
 }

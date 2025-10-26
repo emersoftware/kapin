@@ -1,35 +1,35 @@
 /**
  * Filter Approved Metrics Node
  *
- * This node filters metrics to keep only those that were approved by reviewers.
- * It matches metrics with their reviews by index and creates the final output.
+ * Combines all generated metrics (top priority + by topic) into final output.
+ * Since we removed the review step, all metrics are automatically approved.
  */
 
 import type { GraphState, Metric } from "../../types";
 
 export function filterApprovedNode(state: GraphState): Partial<GraphState> {
   console.log("[NODE] Filter Approved - Starting...");
-  console.log(`[NODE] Total metrics: ${state.allMetrics.length}`);
-  console.log(`[NODE] Total reviews: ${state.reviews.length}`);
+  console.log(`[NODE] Top priority metrics: ${state.topMetrics.length}`);
+  console.log(`[NODE] Metrics by topic: ${state.allMetrics.length}`);
 
-  // Filter metrics where the corresponding review is approved
-  const approvedMetrics: Metric[] = [];
+  // Combine all metrics: top priority + by topic
+  const approvedMetrics: Metric[] = [
+    ...state.topMetrics,
+    ...state.allMetrics,
+  ];
 
-  state.allMetrics.forEach((metric, index) => {
-    const review = state.reviews[index];
+  console.log(`[NODE] Filter Approved - Combined ${approvedMetrics.length} total metrics`);
 
-    if (review && review.approved) {
-      approvedMetrics.push(metric);
-      console.log(`[NODE] ✅ Approved: ${metric.name}`);
-    } else if (review) {
-      console.log(`[NODE] ❌ Rejected: ${metric.name}`);
-      console.log(`[NODE]    Reason: ${review.reasoning}`);
-    } else {
-      console.log(`[NODE] ⚠️  No review found for: ${metric.name}`);
-    }
+  // Log all metrics
+  console.log(`[NODE] === TOP PRIORITY METRICS ===`);
+  state.topMetrics.forEach((metric, index) => {
+    console.log(`[NODE] ${index + 1}. ${metric.name}`);
   });
 
-  console.log(`[NODE] Filter Approved - ${approvedMetrics.length}/${state.allMetrics.length} metrics approved`);
+  console.log(`[NODE] === METRICS BY TOPIC ===`);
+  state.allMetrics.forEach((metric, index) => {
+    console.log(`[NODE] ${index + 1}. ${metric.name} (${metric.featureName})`);
+  });
 
   return {
     approvedMetrics,

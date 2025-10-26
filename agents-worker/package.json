@@ -20,8 +20,8 @@
   "license": "MIT",
   "dependencies": {
     "@e2b/code-interpreter": "^2.1.0",
-    "@langchain/anthropic": "^1.0.0",
     "@langchain/core": "^1.0.0",
+    "@langchain/groq": "^1.0.0",
     "@langchain/langgraph": "^1.0.1",
     "hono": "^4.6.14",
     "langchain": "^1.0.0",

@@ -7,7 +7,7 @@
 
 import * as z from "zod";
 import { createAgent, tool } from "langchain";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatGroq } from "@langchain/groq";
 import type { Env } from "../types";
 import { TopicsOutputSchema } from "../types";
 import { E2BSandboxClient } from "../services/e2b-sandbox-client";
@@ -86,11 +86,11 @@ export function createTopicDetectionAgent(env: Env, sandboxClient: E2BSandboxCli
     }
   );
 
-  // Create agent with Anthropic model
+  // Create agent with Groq model
   const agent = createAgent({
-    model: new ChatAnthropic({
-      modelName: "claude-haiku-4-5",
-      apiKey: env.ANTHROPIC_API_KEY,
+    model: new ChatGroq({
+      model: "openai/gpt-oss-120b",
+      apiKey: env.GROQ_API_KEY,
       temperature: 0,
     }),
     tools: [execCommand, readFile],

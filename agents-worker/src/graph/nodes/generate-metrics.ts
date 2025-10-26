@@ -8,6 +8,7 @@
 import type { GraphState, Env, Topic, Metric } from "../../types";
 import { E2BSandboxClient } from "../../services/e2b-sandbox-client";
 import { createMetricGeneratorAgent } from "../../agents/metric-generator-agent";
+import { saveMetricsProgressively } from "./save-metrics-helper";
 
 /**
  * Worker node: Generates metrics for a single topic
@@ -59,6 +60,16 @@ Read the related files to understand the implementation and suggest realistic me
     result.structuredResponse.metrics.forEach((metric, index) => {
       console.log(`[NODE] Metric ${index + 1}: ${metric.name}`);
     });
+
+    // PROGRESSIVE SAVE: Save metrics immediately for faster user feedback
+    if (state.runId && result.structuredResponse.metrics.length > 0) {
+      await saveMetricsProgressively(
+        state.runId,
+        projectId,
+        result.structuredResponse.metrics,
+        env
+      );
+    }
 
     // Return metrics (will be accumulated by reducer in allMetrics)
     return {
