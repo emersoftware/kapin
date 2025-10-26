@@ -6,6 +6,11 @@ export type Env = {
   SANDBOX_WORKER: Fetcher;
   WEB_WORKER: Fetcher;
   ANTHROPIC_API_KEY: string;
+  // LangSmith tracing (optional)
+  LANGSMITH_TRACING?: string;
+  LANGSMITH_ENDPOINT?: string;
+  LANGSMITH_API_KEY?: string;
+  LANGSMITH_PROJECT?: string;
 };
 
 // Request to start a run

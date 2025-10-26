@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { handleGithubSignIn, updateOnboardingStep, createProjectWithRepos } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,10 +24,23 @@ interface GitHubRepo {
   language?: string | null;
 }
 
+interface ProductMetric {
+  id: string;
+  projectId: string;
+  runId: string;
+  title: string;
+  description: string;
+  featureName: string;
+  metricType: string;
+  sqlQuery: string | null;
+  metadata: unknown;
+  createdAt: Date;
+}
+
 export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowProps) {
   const router = useRouter();
   const [step, setStep] = useState<number>(initialStep);
-  const [expandedMetric, setExpandedMetric] = useState<number | null>(null);
+  const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
   const [selectedRepos, setSelectedRepos] = useState<number[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isCompletingOnboarding, setIsCompletingOnboarding] = useState(false);
@@ -37,6 +50,13 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
   const [isLoadingRepos, setIsLoadingRepos] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+
+  // Project and run state
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [agentMessages, setAgentMessages] = useState<string[]>([]);
+  const [metrics, setMetrics] = useState<ProductMetric[]>([]);
+  const isInitializingRun = useRef(false);
 
   useEffect(() => {
     setStep(initialStep);
@@ -63,6 +83,115 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
 
     return () => clearTimeout(timeoutId);
   }, [searchQuery, step]);
+
+  // Handle step 2: Create run, start agent, connect WebSocket
+  useEffect(() => {
+    if (step !== 2) return;
+
+    // Prevent duplicate runs (React StrictMode executes effects twice)
+    if (isInitializingRun.current) {
+      console.log("Already initializing run, skipping...");
+      return;
+    }
+
+    let ws: WebSocket | null = null;
+
+    const initializeRun = async () => {
+      isInitializingRun.current = true;
+
+      try {
+        // If no projectId, load the most recent project
+        let currentProjectId = projectId;
+        if (!currentProjectId) {
+          const projectsResponse = await fetch("/api/projects/latest");
+          if (!projectsResponse.ok) {
+            console.error("Failed to load latest project");
+            return;
+          }
+          const { projectId: latestProjectId } = await projectsResponse.json();
+          if (!latestProjectId) {
+            console.error("No project found");
+            return;
+          }
+          currentProjectId = latestProjectId;
+          setProjectId(currentProjectId);
+        }
+
+        // Create run
+        const createRunResponse = await fetch("/api/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: currentProjectId }),
+        });
+
+        if (!createRunResponse.ok) {
+          throw new Error("Failed to create run");
+        }
+
+        const { runId: newRunId } = await createRunResponse.json();
+        setRunId(newRunId);
+
+        // Start run
+        const startRunResponse = await fetch(`/api/runs/${newRunId}/start`, {
+          method: "POST",
+        });
+
+        if (!startRunResponse.ok) {
+          throw new Error("Failed to start run");
+        }
+
+        // Connect WebSocket
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${protocol}//${window.location.host}/api/ws/${newRunId}`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          console.log("WebSocket connected");
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+
+            if (data.type === "progress") {
+              setAgentMessages((prev) => [...prev, data.message]);
+            } else if (data.type === "metrics_generated") {
+              // Set all metrics at once (batch)
+              setMetrics(data.metrics);
+            } else if (data.type === "completed") {
+              // Move to step 3
+              setStep(3);
+            } else if (data.type === "error") {
+              console.error("Agent error:", data.error);
+              setAgentMessages((prev) => [...prev, `Error: ${data.error}`]);
+            }
+          } catch (error) {
+            console.error("Error parsing WebSocket message:", error);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error);
+        };
+
+        ws.onclose = () => {
+          console.log("WebSocket disconnected");
+        };
+      } catch (error) {
+        console.error("Error initializing run:", error);
+        // Reset flag on error to allow retry
+        isInitializingRun.current = false;
+      }
+    };
+
+    initializeRun();
+
+    return () => {
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [step, projectId]);
 
   const loadRepositories = async () => {
     setIsLoadingRepos(true);
@@ -123,7 +252,9 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
         repoIds: selectedRepos,
       });
 
-      if (result.success) {
+      if (result.success && result.projectId) {
+        // Save project ID
+        setProjectId(result.projectId);
         // Move to step 2 (sandbox/agent running)
         router.refresh();
       } else {
@@ -136,41 +267,6 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
     }
   };
 
-  const mockMetrics = [
-    {
-      id: 1,
-      title: "User Onboarding Completion Rate",
-      description: "Track how many users complete the onboarding flow",
-      featureName: "Onboarding",
-      metricType: "conversion",
-      sqlQuery: "SELECT COUNT(*) FROM users WHERE onboarding_step = 5 / COUNT(*) FROM users",
-    },
-    {
-      id: 2,
-      title: "Dashboard Daily Active Users",
-      description: "Measure daily active users accessing the dashboard",
-      featureName: "Dashboard",
-      metricType: "engagement",
-      sqlQuery: "SELECT COUNT(DISTINCT user_id) FROM dashboard_views WHERE created_at >= NOW() - INTERVAL '1 day'",
-    },
-    {
-      id: 3,
-      title: "Payment Success Rate",
-      description: "Monitor successful payment transactions vs. failed attempts",
-      featureName: "Payments",
-      metricType: "conversion",
-      sqlQuery: "SELECT COUNT(*) FILTER (WHERE status = 'success') * 100.0 / COUNT(*) FROM payments",
-    },
-  ];
-
-  const agentMessages = [
-    "Cloning repositories...",
-    "Analyzing code structure...",
-    "Detecting features in codebase...",
-    "Identifying authentication flows...",
-    "Mapping user journeys...",
-    "Generating product metrics...",
-  ];
 
   const toggleRepo = (id: number) => {
     setSelectedRepos(prev =>
@@ -341,25 +437,22 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
                   WAKE UP KAPIN
                 </h3>
                 <div className="space-y-3">
-                  {agentMessages.map((message, idx) => (
-                    <p
-                      key={idx}
-                      className="text-sm font-normal text-neutral-500 animate-pulse"
-                      style={{ animationDelay: `${idx * 200}ms` }}
-                    >
-                      {message}
+                  {agentMessages.length === 0 ? (
+                    <p className="text-sm font-normal text-neutral-500">
+                      Initializing...
                     </p>
-                  ))}
+                  ) : (
+                    agentMessages.map((message, idx) => (
+                      <p
+                        key={idx}
+                        className="text-sm font-normal text-neutral-500"
+                      >
+                        {message}
+                      </p>
+                    ))
+                  )}
                 </div>
               </div>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => setStep(3)}
-                className="border-neutral-300 font-normal"
-              >
-                Skip to Results
-              </Button>
             </div>
           </div>
         )}
@@ -369,11 +462,11 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
           <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-6 animate-fade-in">
             <div className="w-full max-w-2xl space-y-8 py-12">
               <p className="text-center text-sm font-normal text-neutral-500">
-                KAPIN discovered {mockMetrics.length} potential metrics for your project
+                KAPIN discovered {metrics.length} potential metrics for your project
               </p>
 
               <div className="space-y-4">
-                {mockMetrics.map((metric) => (
+                {metrics.map((metric) => (
                   <div key={metric.id} className="border border-neutral-200 bg-white overflow-hidden">
                     <div
                       className="cursor-pointer hover:bg-neutral-50 transition-colors p-6"
