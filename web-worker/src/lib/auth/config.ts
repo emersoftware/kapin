@@ -1,10 +1,13 @@
 import NextAuth from "next-auth";
 import GitHub from "next-auth/providers/github";
+import type { GitHubProfile } from "next-auth/providers/github";
 import { db } from "@/lib/db";
 import { users, integrations, orgs, orgMembers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
+  secret: process.env.AUTH_SECRET,
   providers: [
     GitHub({
       clientId: process.env.GITHUB_APP_CLIENT_ID!,
@@ -16,29 +19,46 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
+  // TODO: Uncomment if session is null in Cloudflare production deployment
+  // cookies: {
+  //   sessionToken: {
+  //     name: `__Secure-next-auth.session-token`,
+  //     options: {
+  //       httpOnly: true,
+  //       sameSite: 'lax',
+  //       path: '/',
+  //       secure: process.env.NODE_ENV === 'production',
+  //     },
+  //   },
+  // },
   callbacks: {
     async signIn({ user, account, profile }) {
       if (!account || !profile) return false;
 
+      const githubProfile = profile as unknown as GitHubProfile;
+      const githubId = String(githubProfile.id);
+
       try {
         // Check if user exists
         const existingUser = await db.query.users.findFirst({
-          where: eq(users.githubId, profile.id as string),
+          where: eq(users.githubId, githubId),
         });
 
         let userId: string;
 
         if (!existingUser) {
           // Create new user
+          const newUserData: typeof users.$inferInsert = {
+            githubId,
+            email: githubProfile.email || "",
+            name: githubProfile.name || githubProfile.login || "",
+            avatarUrl: githubProfile.avatar_url,
+            onboardingStep: 1,
+          };
+
           const [newUser] = await db
             .insert(users)
-            .values({
-              githubId: profile.id as string,
-              email: profile.email || "",
-              name: profile.name || profile.login,
-              avatarUrl: profile.avatar_url,
-              onboardingStep: 1,
-            })
+            .values(newUserData)
             .returning();
 
           userId = newUser.id;
@@ -47,7 +67,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const [newOrg] = await db
             .insert(orgs)
             .values({
-              name: `${profile.login}-org`,
+              name: `${githubProfile.login}-org`,
               createdByUserId: userId,
             })
             .returning();
@@ -102,7 +122,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async jwt({ token, account, profile }) {
       if (account && profile) {
-        token.sub = profile.id as string;
+        const githubProfile = profile as unknown as GitHubProfile;
+        token.sub = String(githubProfile.id);
       }
       return token;
     },

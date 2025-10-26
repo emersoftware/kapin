@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   try {
     const session = await auth();
+    console.log("[DEBUG] Session:", { userId: session?.user?.id, email: session?.user?.email });
 
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
 
     // Create GitHub client for user
     const githubClient = await GitHubClient.forUser(session.user.id);
+    console.log("[DEBUG] GitHub client created:", !!githubClient);
 
     if (!githubClient) {
       return NextResponse.json(

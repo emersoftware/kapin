@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
-import { Noto_Sans_JP, Inter } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const notoSansJP = Noto_Sans_JP({
-  variable: "--font-noto-sans-jp",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
+// Temporarily commented due to Google Fonts network timeout
+// Uncomment when network is stable
+// const notoSansJP = Noto_Sans_JP({
+//   variable: "--font-noto-sans-jp",
+//   subsets: ["latin"],
+//   weight: ["400", "500", "600", "700", "800"],
+// });
 
 const inter = Inter({
   variable: "--font-inter",
@@ -27,7 +29,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${notoSansJP.variable} ${inter.variable} font-sans antialiased`}
+        className={`${inter.variable} font-sans antialiased`}
       >
         {children}
       </body>

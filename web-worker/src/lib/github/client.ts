@@ -29,6 +29,24 @@ interface SearchRepositoriesResponse {
   total_count: number;
 }
 
+interface GraphQLRepositoryNode {
+  id: string;
+  databaseId: number;
+  name: string;
+  nameWithOwner: string;
+  description: string | null;
+  url: string;
+  isPrivate: boolean;
+  isFork: boolean;
+  primaryLanguage?: {
+    name: string;
+  } | null;
+  owner: {
+    login: string;
+    avatarUrl: string;
+  };
+}
+
 export class GitHubClient {
   private accessToken: string;
 
@@ -42,6 +60,13 @@ export class GitHubClient {
   static async getAccessTokenForUser(userId: string): Promise<string | null> {
     const integration = await db.query.integrations.findFirst({
       where: eq(integrations.userId, userId),
+    });
+
+    console.log("[DEBUG] Integration lookup:", {
+      userId,
+      found: !!integration,
+      tokenLength: integration?.accessToken?.length || 0,
+      tokenPrefix: integration?.accessToken?.substring(0, 15) || "none",
     });
 
     return integration?.accessToken || null;
@@ -64,16 +89,35 @@ export class GitHubClient {
     page: number = 1,
     perPage: number = 30
   ): Promise<ListRepositoriesResponse> {
+    console.log("[DEBUG] listRepositories called with token:", {
+      tokenLength: this.accessToken?.length || 0,
+      tokenPrefix: this.accessToken?.substring(0, 15) || "none",
+      fullToken: this.accessToken, // TEMPORARY: will remove after debug
+      tokenBytes: Buffer.from(this.accessToken).toString('hex').substring(0, 50),
+    });
+
+    const authHeader = `Bearer ${this.accessToken}`;
+    console.log("[DEBUG] Authorization header:", {
+      headerLength: authHeader.length,
+      header: authHeader, // TEMPORARY: will remove after debug
+    });
+
     const response = await fetch(
       `https://api.github.com/user/repos?per_page=${perPage}&page=${page}&sort=updated`,
       {
         headers: {
-          Authorization: `Bearer ${this.accessToken}`,
+          Authorization: authHeader,
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "KAPIN-App/1.0",
         },
       }
     );
+
+    console.log("[DEBUG] GitHub API response:", {
+      status: response.status,
+      statusText: response.statusText,
+    });
 
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
@@ -99,6 +143,7 @@ export class GitHubClient {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         Accept: "application/vnd.github+json",
+        "User-Agent": "KAPIN-App/1.0",
       },
     });
 
@@ -150,6 +195,7 @@ export class GitHubClient {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         "Content-Type": "application/json",
+        "User-Agent": "KAPIN-App/1.0",
       },
       body: JSON.stringify({
         query,
@@ -174,7 +220,7 @@ export class GitHubClient {
     const repositoryCount = result.data.search.repositoryCount;
 
     // Map GraphQL response to REST API format
-    const repositories: GitHubRepository[] = nodes.map((node: any) => ({
+    const repositories: GitHubRepository[] = nodes.map((node: GraphQLRepositoryNode) => ({
       id: node.databaseId,
       node_id: node.id,
       name: node.name,
