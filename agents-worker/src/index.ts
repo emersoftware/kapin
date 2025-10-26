@@ -77,26 +77,36 @@ app.post("/api/agent/simple/:projectId", async (c) => {
       }, 500);
     }
 
-    // Import and create simple agent
-    const { createSimpleAgent } = await import("./agents/simple-agent");
-    const agent = createSimpleAgent(c.env, sandboxClient);
+    // Import and run multi-agent workflow
+    const { runWorkflow } = await import("./graph/workflow");
 
-    // Invoke agent with messages and context
-    const result = await agent.invoke(
-      { messages: body.messages },
+    const result = await runWorkflow(
+      c.env,
+      sandboxClient,
       {
-        context: { projectId },
-        recursionLimit: 50, // Increased from default 25 to allow more analysis steps
+        runId: `simple-${projectId}`,
+        projectId,
+        repos: [],
+        githubToken: body.githubToken,
+        topics: [],
+        allMetrics: [],
+        reviews: [],
+        approvedMetrics: [],
+        errors: [],
       }
     );
 
     console.log(`[SIMPLE AGENT] Analysis completed for project ${projectId}`);
-    console.log(`[SIMPLE AGENT] Structured response:`, JSON.stringify(result.structuredResponse, null, 2));
+    console.log(`[SIMPLE AGENT] Topics:`, result.topics.length);
+    console.log(`[SIMPLE AGENT] Total metrics:`, result.allMetrics.length);
+    console.log(`[SIMPLE AGENT] Approved metrics:`, result.approvedMetrics.length);
 
     return c.json({
       success: true,
-      structuredResponse: result.structuredResponse,
-      messages: result.messages,
+      topics: result.topics,
+      metrics: result.approvedMetrics,
+      allMetrics: result.allMetrics,
+      reviews: result.reviews,
     });
 
   } catch (error) {
@@ -233,32 +243,32 @@ app.post("/api/runs/:runId/start", async (c) => {
       message: "Analyzing codebase...",
     });
 
-    // 4. Create Simple Agent (pass the existing sandboxClient)
-    const { createSimpleAgent } = await import("./agents/simple-agent");
-    const agent = createSimpleAgent(c.env, sandboxClient);
+    // 4. Run Multi-Agent Workflow
+    const { runWorkflow } = await import("./graph/workflow");
 
-    // 5. Invoke Simple Agent
-    const result = await agent.invoke(
+    const result = await runWorkflow(
+      c.env,
+      sandboxClient,
       {
-        messages: [{
-          role: "user",
-          content: `Analyze the codebase in the current directory and detect product metrics.
-          The repositories are cloned in the current directory (use 'ls' to see them).
-          Focus on features like authentication, payments, dashboards, forms, etc.
-          Return a structured list of metrics with their names, descriptions, and related files.`
-        }]
-      },
-      {
-        context: { projectId: body.projectId },
-        recursionLimit: 50, // Increased from default 25 to allow more analysis steps
+        runId,
+        projectId: body.projectId,
+        repos: body.repos,
+        githubToken: body.githubToken,
+        topics: [],
+        allMetrics: [],
+        reviews: [],
+        approvedMetrics: [],
+        errors: [],
       }
     );
 
-    console.log(`[AGENT] Simple agent completed for run ${runId}`);
-    console.log(`[AGENT] Detected ${result.structuredResponse.metrics.length} metrics`);
+    console.log(`[AGENT] Multi-agent workflow completed for run ${runId}`);
+    console.log(`[AGENT] Detected ${result.topics.length} topics`);
+    console.log(`[AGENT] Generated ${result.allMetrics.length} total metrics`);
+    console.log(`[AGENT] Approved ${result.approvedMetrics.length} metrics`);
 
-    // 6. Transform simple-agent metrics to ProductMetric format
-    const metrics = result.structuredResponse.metrics.map((metric: any) => ({
+    // 5. Transform approved metrics to ProductMetric format for web-worker
+    const metrics = result.approvedMetrics.map((metric) => ({
       title: metric.name,
       description: metric.description,
       featureName: metric.featureName,
@@ -315,7 +325,10 @@ app.post("/api/runs/:runId/start", async (c) => {
       success: true,
       runId,
       result: {
-        metrics: result.structuredResponse.metrics,
+        topics: result.topics,
+        allMetrics: result.allMetrics,
+        approvedMetrics: result.approvedMetrics,
+        reviews: result.reviews,
       },
     });
 

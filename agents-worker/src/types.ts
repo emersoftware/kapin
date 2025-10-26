@@ -1,5 +1,6 @@
-import * as z from "zod";
+import * as z from "zod/v4";
 import type { Fetcher } from '@cloudflare/workers-types';
+import { registry } from "@langchain/langgraph/zod";
 
 // Cloudflare Environment bindings
 export type Env = {
@@ -31,34 +32,55 @@ export type Repository = {
 // Structured Output Schemas
 // ============================================================================
 
-// Feature schema (output from Feature Detector Agent)
-export const FeatureSchema = z.object({
-  name: z.string().describe("Feature name (e.g., 'Authentication', 'Payments')"),
-  description: z.string().describe("What this feature does"),
-  relevantFiles: z.array(z.string()).describe("Key files for this feature (relative paths)"),
+// Topic schema (output from Topic Detection Agent)
+export const TopicSchema = z.object({
+  name: z.string().describe("Topic/feature name (e.g., 'Authentication', 'Payments', 'Dashboard')"),
+  description: z.string().describe("What this topic/feature does"),
+  relatedFiles: z.array(z.string()).describe("Key files for this topic (relative paths)"),
 });
 
-export const FeaturesOutputSchema = z.object({
-  features: z.array(FeatureSchema).max(5).describe("Detected features (maximum 5)"),
+export const TopicsOutputSchema = z.object({
+  topics: z.array(TopicSchema).max(3).describe("Detected topics (maximum 3)"),
 });
 
-export type Feature = z.infer<typeof FeatureSchema>;
+export type Topic = z.infer<typeof TopicSchema>;
 
 // Metric schema (output from Metric Generator Agent)
 export const MetricSchema = z.object({
-  title: z.string().describe("Concise metric name"),
-  description: z.string().describe("What it measures and why it matters"),
-  feature_name: z.string().describe("Feature this metric belongs to"),
-  metric_type: z.enum(["conversion", "frequency", "engagement", "retention", "performance"]).describe("Type of metric"),
-  sql_query: z.string().describe("Approximate SQL query to calculate this metric"),
-  metadata: z.record(z.unknown()).optional().describe("Additional context (importance, frequency, etc.)"),
+  name: z.string().describe("Name of the metric"),
+  description: z.string().describe("Description of what this metric measures"),
+  featureName: z.string().describe("Name of the feature this metric belongs to (e.g., 'Authentication', 'Payments', 'Dashboard')"),
+  metricType: z.enum([
+    "conversion",
+    "engagement",
+    "frequency",
+    "performance",
+    "retention",
+    "revenue",
+    "adoption",
+    "satisfaction"
+  ]).describe("Type of metric"),
+  sqlQuery: z.string().describe("Suggested SQL query to calculate this metric. Use placeholder table names like 'events', 'users', etc."),
+  relatedFiles: z.array(z.string()).describe("List of files related to this metric (relative paths)"),
 });
 
 export const MetricsOutputSchema = z.object({
   metrics: z.array(MetricSchema).describe("Generated product metrics"),
 });
 
-export type ProductMetric = z.infer<typeof MetricSchema>;
+export type Metric = z.infer<typeof MetricSchema>;
+
+// For backward compatibility with web-worker
+export type ProductMetric = {
+  title: string;
+  description: string;
+  featureName: string;
+  metricType: string;
+  sqlQuery: string;
+  metadata?: {
+    relatedFiles?: string[];
+  };
+};
 
 // Review schema (output from Metric Reviewer Agent)
 export const ReviewSchema = z.object({
@@ -67,23 +89,68 @@ export const ReviewSchema = z.object({
   improvements: z.string().optional().describe("Suggestions for improvement if rejected"),
 });
 
-export const MetricsReviewOutputSchema = z.object({
-  reviews: z.array(ReviewSchema).describe("Review result for each metric"),
+export const ReviewOutputSchema = z.object({
+  approved: z.boolean(),
+  reasoning: z.string(),
+  improvements: z.string().optional(),
 });
 
-export type MetricReview = z.infer<typeof ReviewSchema>;
+export type Review = z.infer<typeof ReviewSchema>;
 
 // ============================================================================
-// Graph State
+// Graph State (for multi-agent workflow)
 // ============================================================================
 
-export type GraphState = {
-  runId: string;
-  projectId: string;
-  repos: Repository[];
-  githubToken?: string;
-  sandboxReady: boolean;
-  features: Feature[];
-  allMetrics: ProductMetric[];
-  errors: string[];
-};
+// State schema using Zod v4 with reducers
+export const GraphStateSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  repos: z.array(z.custom<Repository>()),
+  githubToken: z.string().optional(),
+
+  // Step 1: Topic Detection
+  topics: z.array(z.custom<Topic>()).default(() => []),
+
+  // Step 2: Metric Generation (parallelized per topic)
+  // Reducer accumulates metrics from parallel workers
+  allMetrics: z.array(z.custom<Metric>())
+    .default(() => [])
+    .register(registry, {
+      reducer: {
+        fn: (prev, next) => {
+          // next can be a single Metric or an array of Metrics
+          return Array.isArray(next) ? [...prev, ...next] : [...prev, next];
+        },
+      },
+    }),
+
+  // Step 3: Metric Review (parallelized per metric)
+  // Reducer accumulates reviews from parallel workers
+  reviews: z.array(z.custom<Review>())
+    .default(() => [])
+    .register(registry, {
+      reducer: {
+        fn: (prev, next) => {
+          // next can be a single Review or an array of Reviews
+          return Array.isArray(next) ? [...prev, ...next] : [...prev, next];
+        },
+      },
+    }),
+
+  // Step 4: Filtered results
+  approvedMetrics: z.array(z.custom<Metric>()).default(() => []),
+
+  // Error tracking
+  errors: z.array(z.string())
+    .default(() => [])
+    .register(registry, {
+      reducer: {
+        fn: (prev, next) => {
+          // next can be a single error string or an array of error strings
+          return Array.isArray(next) ? [...prev, ...next] : [...prev, next];
+        },
+      },
+    }),
+});
+
+export type GraphState = z.infer<typeof GraphStateSchema>;
