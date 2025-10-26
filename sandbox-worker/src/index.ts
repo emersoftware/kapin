@@ -36,6 +36,20 @@ type ApiResponse<T = unknown> = {
 };
 
 /**
+ * Sanitize git URLs to hide tokens in logs
+ */
+function sanitizeGitUrl(url: string): string {
+  // Replace tokens in git URLs like https://x-access-token:TOKEN@github.com/...
+  return url.replace(
+    /https:\/\/x-access-token:[^@]+@/g,
+    'https://x-access-token:***@'
+  ).replace(
+    /https:\/\/[^:]+:[^@]+@/g,
+    'https://***:***@'
+  );
+}
+
+/**
  * Router for handling sandbox API endpoints
  */
 export default {
@@ -190,7 +204,7 @@ async function handleExec(
  * POST /sandboxes/:projectId/clone
  * Clone a git repository into the sandbox
  *
- * Request body: { repoUrl: string, directory?: string }
+ * Request body: { repoUrl: string, directory?: string, githubToken?: string }
  */
 async function handleClone(
   sandbox: Sandbox,
@@ -199,6 +213,7 @@ async function handleClone(
   const body = await request.json() as {
     repoUrl: string;
     directory?: string;
+    githubToken?: string;
   };
 
   if (!body.repoUrl) {
@@ -209,25 +224,73 @@ async function handleClone(
   const repoName = body.repoUrl.split('/').pop()?.replace('.git', '') || 'repo';
   const targetDir = body.directory || `/workspace/${repoName}`;
 
-  // Clone the repository
-  const cloneCmd = `git clone ${body.repoUrl} ${targetDir}`;
-  const result = await sandbox.exec(cloneCmd);
-
-  if (!result.success) {
-    return jsonResponse({
-      success: false,
-      error: `Failed to clone repository: ${result.stderr}`
-    }, 500);
+  // Build authenticated clone URL if token is provided
+  let cloneUrl = body.repoUrl;
+  if (body.githubToken) {
+    // Transform https://github.com/owner/repo.git
+    // to https://x-access-token:TOKEN@github.com/owner/repo.git
+    cloneUrl = body.repoUrl.replace(
+      'https://github.com/',
+      `https://x-access-token:${body.githubToken}@github.com/`
+    );
   }
 
-  return jsonResponse({
-    success: true,
-    data: {
-      repoUrl: body.repoUrl,
-      directory: targetDir,
-      message: 'Repository cloned successfully'
+  // Check if directory exists
+  const checkDirResult = await sandbox.exec(`test -d ${targetDir} && echo "exists" || echo "not_exists"`);
+  const dirExists = checkDirResult.stdout.trim() === "exists";
+
+  let result;
+
+  if (dirExists) {
+    // Directory exists: git pull
+    console.log(`[Sandbox] Repository ${repoName} exists, pulling latest changes`);
+    result = await sandbox.exec(`cd ${targetDir} && git pull`);
+
+    if (!result.success) {
+      console.error(`[Sandbox] Failed to pull ${repoName}: ${result.stderr}`);
+      return jsonResponse({
+        success: false,
+        error: `Failed to pull repository: ${result.stderr}`
+      }, 500);
     }
-  });
+
+    console.log(`[Sandbox] ✓ Successfully pulled ${repoName}`);
+    return jsonResponse({
+      success: true,
+      data: {
+        repoUrl: body.repoUrl,
+        directory: targetDir,
+        message: 'Repository updated successfully',
+        action: 'pull'
+      }
+    });
+
+  } else {
+    // Directory doesn't exist: git clone
+    const sanitizedUrl = sanitizeGitUrl(cloneUrl);
+    console.log(`[Sandbox] Cloning repository: git clone ${sanitizedUrl} ${targetDir}`);
+    const cloneCmd = `git clone ${cloneUrl} ${targetDir}`;
+    result = await sandbox.exec(cloneCmd);
+
+    if (!result.success) {
+      console.error(`[Sandbox] Failed to clone ${body.repoUrl}: ${result.stderr}`);
+      return jsonResponse({
+        success: false,
+        error: `Failed to clone repository: ${result.stderr}`
+      }, 500);
+    }
+
+    console.log(`[Sandbox] ✓ Successfully cloned ${body.repoUrl}`);
+    return jsonResponse({
+      success: true,
+      data: {
+        repoUrl: body.repoUrl,
+        directory: targetDir,
+        message: 'Repository cloned successfully',
+        action: 'clone'
+      }
+    });
+  }
 }
 
 /**
