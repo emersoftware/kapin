@@ -275,9 +275,32 @@ export default function ProjectsPage() {
         const { projectId, runId } = await response.json();
         setIsModalOpen(false);
 
-        // If starting a run, add small delay to ensure WebSocket connects early
+        // If starting a run, pre-connect WebSocket before navigation
         if (andRun && runId) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+          const isDev = window.location.hostname === "localhost";
+          const agentsWorkerUrl = isDev
+            ? "ws://localhost:8788"
+            : "wss://kapin-agents-worker.e-benjaminsalazarrubilar.workers.dev";
+          const wsUrl = `${agentsWorkerUrl}/ws/${runId}`;
+
+          console.log("[PRE-CONNECT] Establishing WebSocket before navigation:", wsUrl);
+
+          try {
+            const ws = new WebSocket(wsUrl);
+
+            // Wait for connection or timeout
+            await Promise.race([
+              new Promise((resolve) => {
+                ws.onopen = () => {
+                  console.log("[PRE-CONNECT] WebSocket connected successfully");
+                  resolve(null);
+                };
+              }),
+              new Promise((resolve) => setTimeout(resolve, 2000)), // 2s timeout
+            ]);
+          } catch (error) {
+            console.warn("[PRE-CONNECT] WebSocket pre-connect failed, will retry on page:", error);
+          }
         }
 
         router.push(`/projects/${projectId}`);

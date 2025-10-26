@@ -97,6 +97,13 @@ export default function ProjectDetailPage() {
     fetchProject();
   }, [session, status, projectId, router, isMounted]);
 
+  // Set initial message when activeRunId is set (before WebSocket connects)
+  useEffect(() => {
+    if (activeRunId && agentMessages.length === 0) {
+      setAgentMessages(["Connecting to agent...", "Preparing analysis..."]);
+    }
+  }, [activeRunId]);
+
   // WebSocket connection for active run
   useEffect(() => {
     if (!activeRunId) return;
@@ -176,6 +183,39 @@ export default function ProjectDetailPage() {
       }
     };
   }, [activeRunId]);
+
+  // Polling fallback: Refresh project data every 3s when run is active
+  // This catches metrics that WebSocket might have missed
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    console.log("[POLLING] Starting fallback polling for active run");
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/projects/${projectId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setProject(data.project);
+
+          // Check if run completed
+          const activeRun = data.project.runs.find((r: Run) => r.id === activeRunId);
+          if (activeRun && activeRun.status === "completed") {
+            console.log("[POLLING] Run completed, stopping polling");
+            setActiveRunId(null);
+            setAgentMessages([]);
+          }
+        }
+      } catch (error) {
+        console.error("[POLLING] Error fetching project:", error);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => {
+      console.log("[POLLING] Stopping fallback polling");
+      clearInterval(pollInterval);
+    };
+  }, [activeRunId, projectId]);
 
   const handleNewRun = async () => {
     setIsCreatingRun(true);
@@ -310,18 +350,24 @@ export default function ProjectDetailPage() {
           </div>
 
           {/* Active Run Progress */}
-          {activeRunId && agentMessages.length > 0 && (
+          {project.runs.some(r => r.status === "running") && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-blue-900">Agent Running...</h3>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
               </div>
               <div className="space-y-2">
-                {agentMessages.map((message, i) => (
-                  <p key={i} className="text-sm text-blue-800 font-normal">
-                    {message}
+                {agentMessages.length > 0 ? (
+                  agentMessages.map((message, i) => (
+                    <p key={i} className="text-sm text-blue-800 font-normal">
+                      {message}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-sm text-blue-800 font-normal">
+                    Analyzing codebase...
                   </p>
-                ))}
+                )}
               </div>
             </div>
           )}
