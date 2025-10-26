@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { handleGithubSignIn, updateOnboardingStep, createProjectWithRepos } from "./actions";
+import { handleGithubSignIn, handleSignOut, updateOnboardingStep, createProjectWithRepos } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Github, Search, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Github, Search, Loader2, ChevronDown, ChevronUp, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface OnboardingFlowProps {
@@ -306,6 +306,21 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
         </div>
       )}
 
+      {/* Logout Button - Show when logged in (step >= 1) */}
+      {step >= 1 && (
+        <div className="fixed top-6 right-6 z-50">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleSignOut()}
+            className="text-neutral-600 hover:text-neutral-900"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign out
+          </Button>
+        </div>
+      )}
+
       {/* Content Container */}
       <div className={step !== 0 ? "pt-24" : ""}>
         {/* Step 0: Landing + Auth */}
@@ -313,8 +328,12 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
           <div className="min-h-screen flex items-center justify-center px-6 animate-fade-in">
             <div className="text-center space-y-12 max-w-xl">
               <div className="space-y-8">
-                <div className="inline-block p-6 border-2 border-neutral-300">
-                  <span className="text-5xl font-bold text-neutral-900">K</span>
+                <div className="flex items-center justify-center">
+                  <img
+                    src="/kapin-logo.png"
+                    alt="KAPIN Logo"
+                    className="h-64 w-auto"
+                  />
                 </div>
                 <h1 className="text-7xl font-extrabold tracking-[0.3em] text-neutral-900 font-[var(--font-inter)]">
                   KAPIN

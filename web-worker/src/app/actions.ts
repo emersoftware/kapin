@@ -1,6 +1,6 @@
 "use server";
 
-import { signIn, auth } from "@/lib/auth/config";
+import { signIn, signOut, auth } from "@/lib/auth/config";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { users, projects, repos, projectRepos, orgMembers } from "@/lib/db/schema";
@@ -9,6 +9,10 @@ import { GitHubClient } from "@/lib/github/client";
 
 export async function handleGithubSignIn() {
   await signIn("github", { redirectTo: "/" });
+}
+
+export async function handleSignOut() {
+  await signOut({ redirectTo: "/" });
 }
 
 export async function updateOnboardingStep(step: number) {
