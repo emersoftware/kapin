@@ -39,7 +39,10 @@ app.post("/api/agent/simple/:projectId", async (c) => {
     // Invoke agent with messages and context
     const result = await agent.invoke(
       { messages: body.messages },
-      { context: { projectId } }
+      {
+        context: { projectId },
+        recursionLimit: 50, // Increased from default 25 to allow more analysis steps
+      }
     );
 
     console.log(`[SIMPLE AGENT] Analysis completed for project ${projectId}`);
