@@ -20,9 +20,27 @@ import { reviewSingleMetric } from "./nodes/review-metrics";
 import { filterApprovedNode } from "./nodes/filter-approved";
 
 /**
+ * Configure LangSmith tracing globally (if enabled)
+ */
+function configureLangSmithTracing(env: Env) {
+  if (env.LANGSMITH_TRACING === "true" && env.LANGSMITH_API_KEY) {
+    console.log("[WORKFLOW] LangSmith tracing enabled for project:", env.LANGSMITH_PROJECT);
+    process.env.LANGCHAIN_TRACING_V2 = "true";
+    process.env.LANGCHAIN_ENDPOINT = env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com";
+    process.env.LANGCHAIN_API_KEY = env.LANGSMITH_API_KEY;
+    process.env.LANGCHAIN_PROJECT = env.LANGSMITH_PROJECT || "default";
+  } else {
+    console.log("[WORKFLOW] LangSmith tracing disabled");
+  }
+}
+
+/**
  * Creates the complete multi-agent workflow
  */
 export function createWorkflow(env: Env, sandboxClient: E2BSandboxClient) {
+  // Configure LangSmith once for the entire workflow
+  configureLangSmithTracing(env);
+
   // Create graph with state schema (Zod v4)
   const graph = new StateGraph(GraphStateSchema);
 

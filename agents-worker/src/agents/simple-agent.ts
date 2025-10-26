@@ -123,16 +123,6 @@ export function createSimpleAgent(env: Env, sandboxClient: E2BSandboxClient) {
     }
   );
 
-  // Set LangSmith environment variables for tracing
-  if (env.LANGSMITH_TRACING === "true" && env.LANGSMITH_API_KEY) {
-    console.log("[AGENT] LangSmith tracing enabled for project:", env.LANGSMITH_PROJECT);
-    // Set process env vars for LangChain to pick up
-    process.env.LANGCHAIN_TRACING_V2 = "true";
-    process.env.LANGCHAIN_ENDPOINT = env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com";
-    process.env.LANGCHAIN_API_KEY = env.LANGSMITH_API_KEY;
-    process.env.LANGCHAIN_PROJECT = env.LANGSMITH_PROJECT || "default";
-  }
-
   // Create agent with Anthropic model
   const agent = createAgent({
     model: new ChatAnthropic({
