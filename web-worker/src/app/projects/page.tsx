@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter } from "@/components/ui/dialog";
@@ -54,6 +54,10 @@ export default function ProjectsPage() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // WebSocket state for active runs
+  const [activeRuns, setActiveRuns] = useState<Record<string, string>>({}); // projectId -> runId
+  const [wsConnections, setWsConnections] = useState<Record<string, WebSocket>>({}); // runId -> ws
+
   // Set mounted state
   useEffect(() => {
     setIsMounted(true);
@@ -96,6 +100,95 @@ export default function ProjectsPage() {
 
     fetchProjects();
   }, [session, status, isMounted]);
+
+  // Monitor active runs and establish WebSocket connections
+  useEffect(() => {
+    if (!isMounted) return;
+    if (status === "loading" || !session) return;
+
+    // Find all running runs
+    const runningRuns: Record<string, string> = {};
+    projects.forEach((project) => {
+      const activeRun = project.runs?.find((r) => r.status === "running");
+      if (activeRun) {
+        runningRuns[project.id] = activeRun.id;
+      }
+    });
+
+    setActiveRuns(runningRuns);
+
+    // Establish WebSocket connections for active runs
+    Object.entries(runningRuns).forEach(([projectId, runId]) => {
+      if (!wsConnections[runId]) {
+        const isDev = window.location.hostname === "localhost";
+        const agentsWorkerUrl = isDev
+          ? "ws://localhost:8788"
+          : "wss://kapin-agents-worker.e-benjaminsalazarrubilar.workers.dev";
+        const wsUrl = `${agentsWorkerUrl}/ws/${runId}`;
+
+        const ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+
+            if (data.type === "metrics_generated") {
+              // Update project metrics count in state
+              setProjects((prev) => prev.map((p) => {
+                if (p.id === projectId) {
+                  const updatedProject = { ...p };
+                  const runIndex = updatedProject.runs.findIndex((r) => r.id === runId);
+                  if (runIndex >= 0) {
+                    // Add new metrics to the run
+                    updatedProject.runs[runIndex].productMetrics = [
+                      ...updatedProject.runs[runIndex].productMetrics,
+                      ...data.metrics
+                    ];
+                  }
+                  return updatedProject;
+                }
+                return p;
+              }));
+            } else if (data.type === "completed") {
+              // Update run status
+              setProjects((prev) => prev.map((p) => {
+                if (p.id === projectId) {
+                  const updatedProject = { ...p };
+                  const runIndex = updatedProject.runs.findIndex((r) => r.id === runId);
+                  if (runIndex >= 0) {
+                    updatedProject.runs[runIndex].status = "completed";
+                  }
+                  return updatedProject;
+                }
+                return p;
+              }));
+
+              // Close WebSocket
+              ws.close();
+              setWsConnections((prev) => {
+                const newConnections = { ...prev };
+                delete newConnections[runId];
+                return newConnections;
+              });
+            }
+          } catch (error) {
+            console.error("Error parsing WebSocket message:", error);
+          }
+        };
+
+        setWsConnections((prev) => ({ ...prev, [runId]: ws }));
+      }
+    });
+
+    // Cleanup closed connections
+    return () => {
+      Object.values(wsConnections).forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      });
+    };
+  }, [projects, session, status, isMounted, wsConnections]); // Importante: depende de projects
 
   const loadRepositories = async () => {
     setIsLoadingRepos(true);
@@ -179,8 +272,14 @@ export default function ProjectsPage() {
       });
 
       if (response.ok) {
-        const { projectId } = await response.json();
+        const { projectId, runId } = await response.json();
         setIsModalOpen(false);
+
+        // If starting a run, add small delay to ensure WebSocket connects early
+        if (andRun && runId) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
         router.push(`/projects/${projectId}`);
       } else {
         console.error("Failed to create project");
@@ -249,6 +348,12 @@ export default function ProjectsPage() {
               </h1>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => signOut({ callbackUrl: "/" })}
+                className="px-4 py-2 border border-neutral-300 rounded-lg text-neutral-700 hover:bg-neutral-50 font-normal"
+              >
+                Logout
+              </button>
               <img
                 src={session.user?.image || ""}
                 alt={session.user?.name || ""}

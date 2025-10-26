@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth/config";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, runs, productMetrics, orgMembers, repos, projectRepos } from "@/lib/db/schema";
+import { projects, runs, productMetrics, orgMembers, repos, projectRepos, integrations } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { GitHubClient } from "@/lib/github/client";
 
@@ -160,7 +160,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // If startRun is true, create a run (will be started on the project page)
+    // If startRun is true, create and immediately start a run
     let runId = null;
     if (startRun) {
       const [run] = await db
@@ -172,6 +172,45 @@ export async function POST(request: Request) {
         .returning();
 
       runId = run.id;
+
+      // Get GitHub token
+      const integration = await db.query.integrations.findFirst({
+        where: eq(integrations.userId, session.user.id),
+      });
+
+      const githubToken = integration?.accessToken;
+
+      // Prepare repos for agent
+      const reposForAgent = repoRecords.map((r) => ({
+        id: r.id,
+        name: r.name,
+        clone_url: r.clone_url,
+      }));
+
+      // Call agents-worker to start the run (fire-and-forget)
+      const agentsWorkerUrl = process.env.AGENTS_WORKER_URL || "http://localhost:8788";
+      fetch(`${agentsWorkerUrl}/api/runs/${run.id}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: project.id,
+          repos: reposForAgent,
+          githubToken,
+        }),
+      }).catch((error) => {
+        console.error(`Failed to start agent for run ${run.id}:`, error);
+        // Mark run as failed asynchronously
+        db.update(runs)
+          .set({ status: "failed" })
+          .where(eq(runs.id, run.id))
+          .catch((dbError) => console.error("Failed to update run status:", dbError));
+      });
+
+      // Mark as running immediately (optimistic)
+      await db
+        .update(runs)
+        .set({ status: "running" })
+        .where(eq(runs.id, run.id));
     }
 
     return NextResponse.json({

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -122,12 +122,41 @@ export default function ProjectDetailPage() {
           setAgentMessages((prev) => [...prev, data.message]);
         } else if (data.type === "metrics_generated") {
           console.log("Metrics received:", data.metrics);
-          // Refresh project data to show new metrics
-          window.location.reload();
+
+          // Update project state with new metrics
+          setProject((prev) => {
+            if (!prev) return prev;
+            const updatedProject = { ...prev };
+            const activeRunIndex = updatedProject.runs.findIndex((r) => r.id === activeRunId);
+
+            if (activeRunIndex >= 0) {
+              // Agregar las nuevas métricas al run activo
+              updatedProject.runs[activeRunIndex].productMetrics = [
+                ...updatedProject.runs[activeRunIndex].productMetrics,
+                ...data.metrics
+              ];
+            }
+
+            return updatedProject;
+          });
         } else if (data.type === "completed") {
           console.log("Run completed");
+
+          // Update run status
+          setProject((prev) => {
+            if (!prev) return prev;
+            const updatedProject = { ...prev };
+            const completedRunIndex = updatedProject.runs.findIndex((r) => r.id === activeRunId);
+
+            if (completedRunIndex >= 0) {
+              updatedProject.runs[completedRunIndex].status = "completed";
+            }
+
+            return updatedProject;
+          });
+
           setActiveRunId(null);
-          window.location.reload();
+          setAgentMessages([]);
         } else if (data.type === "error") {
           console.error("Agent error:", data.error);
           setAgentMessages((prev) => [...prev, `Error: ${data.error}`]);
@@ -159,7 +188,24 @@ export default function ProjectDetailPage() {
         const { runId } = await response.json();
         setActiveRunId(runId);
         setAgentMessages(["Starting agent analysis..."]);
-        window.location.reload(); // Reload to show new run
+
+        // Update project state to add the new run
+        setProject((prev) => {
+          if (!prev) return prev;
+          const updatedProject = { ...prev };
+
+          // Add new run at the beginning of runs array
+          const newRun = {
+            id: runId,
+            status: "running",
+            startedAt: new Date(),
+            completedAt: null,
+            productMetrics: []
+          };
+
+          updatedProject.runs = [newRun, ...updatedProject.runs];
+          return updatedProject;
+        });
       } else {
         console.error("Failed to start run");
       }
@@ -228,6 +274,12 @@ export default function ProjectDetailPage() {
                 className="px-4 py-2 border border-neutral-300 rounded-lg text-neutral-700 hover:bg-neutral-50 font-normal"
               >
                 Back to Projects
+              </button>
+              <button
+                onClick={() => signOut({ callbackUrl: "/" })}
+                className="px-4 py-2 border border-neutral-300 rounded-lg text-neutral-700 hover:bg-neutral-50 font-normal"
+              >
+                Logout
               </button>
               {session?.user?.image && (
                 <img
