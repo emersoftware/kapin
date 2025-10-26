@@ -3,9 +3,10 @@ import type { Fetcher } from '@cloudflare/workers-types';
 
 // Cloudflare Environment bindings
 export type Env = {
-  SANDBOX_WORKER: Fetcher;
-  WEB_WORKER: Fetcher;
+  E2B_API_KEY: string;
+  AGENT_SESSION: DurableObjectNamespace;
   ANTHROPIC_API_KEY: string;
+  WEB_WORKER_URL: string; // URL to web-worker for HTTP callbacks
   // LangSmith tracing (optional)
   LANGSMITH_TRACING?: string;
   LANGSMITH_ENDPOINT?: string;

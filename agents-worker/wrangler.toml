@@ -3,17 +3,19 @@ main = "src/index.ts"
 compatibility_date = "2025-01-20"
 compatibility_flags = ["nodejs_compat"]
 
-# Service Bindings to other workers
-[[services]]
-binding = "SANDBOX_WORKER"
-service = "kapin-sandbox-worker"
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+script_name = "kapin-agents-worker"
 
-[[services]]
-binding = "WEB_WORKER"
-service = "kapin-web-worker"
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AgentSession"]
 
 [vars]
 ENVIRONMENT = "production"
+WEB_WORKER_URL = "https://kapin-web-worker.e-benjaminsalazarrubilar.workers.dev"
 
-# Secrets (set via: wrangler secret put ANTHROPIC_API_KEY)
+# Secrets (set via: wrangler secret put)
+# E2B_API_KEY
 # ANTHROPIC_API_KEY
