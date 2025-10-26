@@ -2,15 +2,7 @@ import { db } from "@/lib/db";
 import { productMetrics } from "@/lib/db/schema";
 import { NextResponse } from "next/server";
 
-interface CloudflareEnv {
-  WEBSOCKET_SESSION: DurableObjectNamespace;
-}
-
-export async function POST(
-  request: Request,
-  _params: never,
-  context: { env: CloudflareEnv }
-) {
+export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { runId, projectId, metrics } = body;
@@ -39,16 +31,15 @@ export async function POST(
       )
       .returning();
 
-    // Broadcast to WebSocket clients (single event with all metrics)
-    if (context?.env?.WEBSOCKET_SESSION) {
-      const id = context.env.WEBSOCKET_SESSION.idFromName("websocket-session");
-      const stub = context.env.WEBSOCKET_SESSION.get(id);
+    // Broadcast to WebSocket clients via agents-worker
+    try {
+      const agentsWorkerUrl = process.env.AGENTS_WORKER_URL || "http://localhost:8788";
+      console.log(`[WS Metrics] Sending broadcast for runId=${runId}, count=${savedMetrics.length}`);
+      console.log(`[WS Metrics] Agents worker URL: ${agentsWorkerUrl}`);
 
-      await stub.fetch(new Request("https://fake/broadcast", {
+      const broadcastResponse = await fetch(`${agentsWorkerUrl}/api/broadcast`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           runId,
           message: {
@@ -56,9 +47,17 @@ export async function POST(
             metrics: savedMetrics,
           },
         }),
-      }));
-    } else {
-      console.log(`[WS Metrics] runId=${runId}, count=${savedMetrics.length}`);
+      });
+
+      if (!broadcastResponse.ok) {
+        const errorText = await broadcastResponse.text();
+        console.error(`[WS Metrics] Broadcast failed with status ${broadcastResponse.status}: ${errorText}`);
+      } else {
+        console.log(`[WS Metrics] ✅ Broadcast successful for runId=${runId}`);
+      }
+    } catch (error) {
+      console.error(`[WS Metrics] ❌ Failed to broadcast:`, error);
+      // Don't fail the request if broadcast fails
     }
 
     return NextResponse.json({ success: true, count: savedMetrics.length });

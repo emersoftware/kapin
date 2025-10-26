@@ -42,7 +42,22 @@ export async function GET(
       where: eq(productMetrics.runId, runId),
     });
 
-    return NextResponse.json({ metrics });
+    // Format metrics to match frontend expectations
+    const formattedMetrics = metrics.map(metric => ({
+      id: metric.id,
+      title: metric.title,
+      description: metric.description,
+      featureName: metric.featureName,
+      metricType: metric.metricType,
+      sqlQuery: metric.sqlQuery,
+      metadata: metric.metadata || {},
+    }));
+
+    return NextResponse.json({
+      metrics: formattedMetrics,
+      runId: runId,
+      status: run.status
+    });
   } catch (error) {
     console.error("Error fetching metrics:", error);
     return NextResponse.json(

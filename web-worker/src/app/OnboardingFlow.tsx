@@ -57,6 +57,8 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
   const [agentMessages, setAgentMessages] = useState<string[]>([]);
   const [metrics, setMetrics] = useState<ProductMetric[]>([]);
   const isInitializingRun = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null); // Persist WebSocket across steps
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null); // Persist poll interval
 
   useEffect(() => {
     setStep(initialStep);
@@ -94,8 +96,6 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
       return;
     }
 
-    let ws: WebSocket | null = null;
-
     const initializeRun = async () => {
       isInitializingRun.current = true;
 
@@ -131,40 +131,67 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
         const { runId: newRunId } = await createRunResponse.json();
         setRunId(newRunId);
 
-        // Start run
-        const startRunResponse = await fetch(`/api/runs/${newRunId}/start`, {
-          method: "POST",
-        });
-
-        if (!startRunResponse.ok) {
-          throw new Error("Failed to start run");
-        }
-
-        // Connect WebSocket directly to agents-worker
+        // Connect WebSocket FIRST (before starting the agent)
         const isDev = window.location.hostname === "localhost";
         const agentsWorkerUrl = isDev
           ? "ws://localhost:8788"
           : "wss://kapin-agents-worker.e-benjaminsalazarrubilar.workers.dev";
         const wsUrl = `${agentsWorkerUrl}/ws/${newRunId}`;
         console.log("Connecting to WebSocket:", wsUrl);
-        ws = new WebSocket(wsUrl);
+        wsRef.current = new WebSocket(wsUrl);
 
-        ws.onopen = () => {
-          console.log("WebSocket connected");
-        };
+        // Wait for WebSocket to be ready before starting the agent
+        await new Promise<void>((resolve, reject) => {
+          if (!wsRef.current) {
+            reject(new Error("WebSocket not initialized"));
+            return;
+          }
 
-        ws.onmessage = (event) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("WebSocket connection timeout"));
+          }, 5000);
+
+          wsRef.current.onopen = () => {
+            console.log("WebSocket connected - now starting agent");
+            clearTimeout(timeout);
+            resolve();
+          };
+
+          wsRef.current.onerror = (error) => {
+            console.error("WebSocket connection error:", error);
+            clearTimeout(timeout);
+            reject(error);
+          };
+        });
+
+        // Now that WebSocket is connected, setup message handlers
+        wsRef.current.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
 
             if (data.type === "progress") {
               setAgentMessages((prev) => [...prev, data.message]);
             } else if (data.type === "metrics_generated") {
-              // Set all metrics at once (batch)
-              setMetrics(data.metrics);
+              console.log("📊 Metrics received:", data.metrics.length);
+
+              // Append new metrics (don't overwrite)
+              setMetrics((prev) => {
+                const newMetrics = [...prev, ...data.metrics];
+                console.log(`Total metrics now: ${newMetrics.length}`);
+                return newMetrics;
+              });
+
+              // Move to step 3 immediately on first metrics
+              setStep((currentStep) => {
+                if (currentStep === 2) {
+                  console.log("✅ Moving to step 3 (first metrics received)");
+                  return 3;
+                }
+                return currentStep;
+              });
             } else if (data.type === "completed") {
-              // Move to step 3
-              setStep(3);
+              console.log("✅ Agent completed");
+              // Don't change step here - already moved to step 3 on first metrics
             } else if (data.type === "error") {
               console.error("Agent error:", data.error);
               setAgentMessages((prev) => [...prev, `Error: ${data.error}`]);
@@ -174,13 +201,42 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
           }
         };
 
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
-        };
-
-        ws.onclose = () => {
+        wsRef.current.onclose = () => {
           console.log("WebSocket disconnected");
         };
+
+        // Start the agent NOW (after WebSocket is connected)
+        console.log("Starting agent for run:", newRunId);
+        const startRunResponse = await fetch(`/api/runs/${newRunId}/start`, {
+          method: "POST",
+        });
+
+        if (!startRunResponse.ok) {
+          throw new Error("Failed to start run");
+        }
+        console.log("Agent started successfully");
+
+        // Fallback: Poll for metrics every 3 seconds if WebSocket fails
+        pollIntervalRef.current = setInterval(async () => {
+          if (!newRunId) return;
+
+          try {
+            const metricsResponse = await fetch(`/api/runs/${newRunId}/metrics`);
+            if (metricsResponse.ok) {
+              const { metrics: fetchedMetrics } = await metricsResponse.json();
+              if (fetchedMetrics && fetchedMetrics.length > 0) {
+                console.log("Metrics found via polling, moving to step 3");
+                setMetrics((prev) => [...prev, ...fetchedMetrics]); // Append, don't overwrite
+                setStep(3);
+                if (pollIntervalRef.current) {
+                  clearInterval(pollIntervalRef.current);
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Error polling for metrics:", error);
+          }
+        }, 3000);
       } catch (error) {
         console.error("Error initializing run:", error);
         // Reset flag on error to allow retry
@@ -190,12 +246,28 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
 
     initializeRun();
 
+    // Cleanup: only clear polling, WebSocket stays open to listen for metrics in step 3
     return () => {
-      if (ws) {
-        ws.close();
+      // Clear polling interval
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
+      // Note: WebSocket is kept open to continue listening for metrics
+      // It will be cleaned up when component unmounts (see separate useEffect)
     };
   }, [step, projectId]);
+
+  // Cleanup WebSocket when component unmounts completely
+  useEffect(() => {
+    return () => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        console.log("Component unmounting - closing WebSocket");
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
 
   const loadRepositories = async () => {
     setIsLoadingRepos(true);
