@@ -140,9 +140,13 @@ export default function OnboardingFlow({ initialStep, userId }: OnboardingFlowPr
           throw new Error("Failed to start run");
         }
 
-        // Connect WebSocket
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${protocol}//${window.location.host}/api/ws/${newRunId}`;
+        // Connect WebSocket directly to agents-worker
+        const isDev = window.location.hostname === "localhost";
+        const agentsWorkerUrl = isDev
+          ? "ws://localhost:8788"
+          : "wss://kapin-agents-worker.e-benjaminsalazarrubilar.workers.dev";
+        const wsUrl = `${agentsWorkerUrl}/ws/${newRunId}`;
+        console.log("Connecting to WebSocket:", wsUrl);
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {

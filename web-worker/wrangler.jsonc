@@ -17,32 +17,5 @@
 	},
 	"observability": {
 		"enabled": true
-	},
-	/**
-	 * Service Bindings (communicate between multiple Workers)
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
-	 */
-	"services": [
-		{
-			"binding": "SANDBOX_WORKER",
-			"service": "kapin-sandbox-worker"
-		},
-		{
-			"binding": "AGENTS_WORKER",
-			"service": "kapin-agents-worker"
-		}
-	],
-	/**
-	 * Durable Objects
-	 * https://developers.cloudflare.com/durable-objects/
-	 */
-	"durable_objects": {
-		"bindings": [
-			{
-				"name": "WEBSOCKET_SESSION",
-				"class_name": "WebSocketSession",
-				"script_name": "kapin-web-worker"
-			}
-		]
 	}
 }

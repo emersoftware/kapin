@@ -4,16 +4,9 @@ import { runs, projects, orgMembers, repos, projectRepos, integrations } from "@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-interface CloudflareEnv {
-  AGENTS_WORKER: {
-    fetch(request: Request): Promise<Response>;
-  };
-}
-
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
-  context: { env: CloudflareEnv }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: runId } = await params;
@@ -73,42 +66,21 @@ export async function POST(
       clone_url: pr.repo.cloneUrl,
     }));
 
-    // Call agents-worker via Service Binding or HTTP fallback
+    // Call agents-worker via HTTP
     try {
-      let agentsWorkerResponse: Response;
-
-      // Try Service Binding first (production/wrangler dev)
-      if (context?.env?.AGENTS_WORKER) {
-        agentsWorkerResponse = await context.env.AGENTS_WORKER.fetch(
-          new Request(`https://fake/api/runs/${runId}/start`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              runId: run.id,
-              projectId: run.projectId,
-              repos: reposData,
-              githubToken,
-            }),
-          })
-        );
-      } else {
-        // Fallback to HTTP (local development)
-        const agentsWorkerUrl = process.env.AGENTS_WORKER_URL || "http://localhost:8788";
-        agentsWorkerResponse = await fetch(`${agentsWorkerUrl}/api/runs/${runId}/start`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            runId: run.id,
-            projectId: run.projectId,
-            repos: reposData,
-            githubToken,
-          }),
-        });
-      }
+      const agentsWorkerUrl = process.env.AGENTS_WORKER_URL || "http://localhost:8788";
+      const agentsWorkerResponse = await fetch(`${agentsWorkerUrl}/api/runs/${runId}/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          runId: run.id,
+          projectId: run.projectId,
+          repos: reposData,
+          githubToken,
+        }),
+      });
 
       if (!agentsWorkerResponse.ok) {
         throw new Error(`Agents worker returned ${agentsWorkerResponse.status}`);
