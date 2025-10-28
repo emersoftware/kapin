@@ -62,8 +62,9 @@ cloudflare worker for managing sandboxes _(note: currently broken due to migrati
 ---
 ## Roadmap (if I get motivated)
 
-- open prs with the changes needed to implement the metrics (database migrations, data layer)
-- database read access to show the metrics in the app
+- [ ] open prs with the changes needed to implement the metrics (database migrations, data layer)
+- [ ] add database read access to display the metrics in the app
+
 ---
 ## Learnings from the hackathon
 
