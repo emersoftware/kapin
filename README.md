@@ -73,8 +73,8 @@ my 1st hackathon
 - **don't waste time on complex integrations** — i spent too much time building github oauth integration to clone user repos. instead, I could have just used public repos from github to test the core functionality faster
 
 ### Choose your focus
-- **learning new technologies?** I chose to learn cloudflare workers, which meant dealing with:
-  - opennextjs on cloudflare workers (different from node environment)
+- **learning new technologies?** i chose to learn cloudflare workers, which meant dealing with:
+  - opennextjs on cloudflare workers (postgres tcp driver has connection reuse bugs — had to switch to neon's http driver)
   - python workers (still in beta)
   - langchain js (different from python version)
 
@@ -89,5 +89,8 @@ my 1st hackathon
 
 ### Networking matters
 - **hackathons aren't just about building cool stuff** — they're also about meeting cool people. i didn't realize this until late at night when an organizer approached me and said "go meet people!" i'm introverted and often not interested in socializing, but i regret not talking more with the people. if you're like me, set a reminder to take ~~networking~~ netfriending breaks — future you will thank you
+
+### Ask mentors for help
+- **most hackathons have mentors** — they're there to help you with technical issues, product strategy, and proof of concept feedback. don't be shy, talk to them and ask questions. even if there aren't official mentors, ask any organizer — nobody will say no. i should have asked for help more often instead of getting stuck troubleshooting alone
 
 ---
