@@ -2,9 +2,11 @@
 
 > An agent that audits your code and tells you where to start measuring to improve your product
 
+**tldr;** ai agent that analyzes your codebase, detects features, and generates product metrics you should track — with implementation guides. built with next.js, cloudflare workers, langgraph, and e2b sandboxes. 
+
 ---
 
-**Built during [the agent hackathon](https://hack.skyward.ai/) organized by [Skyward.](https://skyward.ai/) and [CommunityOS](https://communityos.io/)**
+**Built during [The Agent Hackathon](https://hack.skyward.ai/) organized by [Skyward.](https://skyward.ai/) and [CommunityOS](https://communityos.io/)**
 _learnings documented at the end of this readme_
 
 ---
@@ -68,6 +70,8 @@ cloudflare worker for managing sandboxes _(note: currently broken due to migrati
 ---
 ## Learnings from the hackathon
 
+**tldr;** skip complex integrations, focus on core, don't learn new tech, ship fast, read evaluation rubrics, go with a team you know, network actively, and ask mentors for help.
+
 my 1st hackathon
 
 ### Time management
@@ -81,7 +85,7 @@ my 1st hackathon
 
   this cost me significant time troubleshooting. i could have deployed with familiar technologies (vercel, railway, etc.) and avoided these blockers. choose learning or shipping fast — it's hard to do both in a hackathon
 
-- **building to win?** i chose to build a project i'd wanted to create for months, which didn't align with the judges' criteria. if winning is your priority, read the evaluation rubrics beforehand and align your project with them. in this hackathon, social impact was a key criterion that i didn't address. you can build what you love or build to win (or both) - just know which one you're choosing
+- **building to win?** i chose to build a project i'd wanted to create for months, which didn't align with criteria. read the evaluation rubrics beforehand and align your project with them. in this hackathon, social impact was a key criterion that i didn't address. you can build what you love or build to win (or both) - just know which one you're choosing
 
 ### Team dynamics
 - **going solo?** i went alone (one-man show), which limited my knowledge and troubleshooting capacity. when you hit a blocker, there's no one to brainstorm with or take over while you rest
